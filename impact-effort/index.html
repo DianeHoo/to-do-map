@@ -1,0 +1,1731 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Impact / Effort Map</title>
+<meta property="og:title" content="Impact / Effort Map | Find your quick wins.">
+<meta property="og:description" content="Sort tasks by impact and effort. They land in four quadrants — quick wins, big bets, fill-ins, and thankless tasks — so you can see what's worth doing at a glance.">
+<meta property="og:image" content="https://todomap.live/preview.png">
+<meta property="og:url" content="https://todomap.live">
+<meta property="og:type" content="website">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* ── Reset & Base ── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0,0,0,0);
+  white-space: nowrap;
+}
+
+:root {
+  --canvas-bg: #fafaf5;
+  --card-bg: #ffffff;
+  --text: #2e342d;
+  --text-dim: rgba(46, 52, 45, 0.58);
+  --text-muted: rgba(46, 52, 45, 0.3);
+  --text-ghost: rgba(46, 52, 45, 0.2);
+  --sage: #526347;
+  --sage-08: rgba(82, 99, 71, 0.08);
+  --sage-15: rgba(82, 99, 71, 0.15);
+  --sage-20: rgba(82, 99, 71, 0.20);
+  --sage-25: rgba(82, 99, 71, 0.25);
+  --sage-45: rgba(82, 99, 71, 0.55);
+  --sage-50: rgba(82, 99, 71, 0.60);
+  --sage-interactive: rgba(82, 99, 71, 0.82);
+  --sage-label: rgba(82, 99, 71, 0.68);
+  --card-shadow: 0 1px 4px rgba(46, 52, 45, 0.05);
+  --card-shadow-lift: 0 8px 24px rgba(46, 52, 45, 0.16);
+  --radius: 12px;
+  --font-display: 'Manrope', sans-serif;
+  --font-body: 'Plus Jakarta Sans', sans-serif;
+}
+
+html, body {
+  height: 100%;
+  background: var(--canvas-bg);
+  color: var(--text);
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden; /* Lock — no native scrolling */
+}
+
+/* ── Vertical flow container ── */
+.flow-container {
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+  position: relative;
+}
+
+/* ── Phase navigation buttons ── */
+.phase-nav-btn {
+  position: fixed;
+  bottom: 32px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 100;
+  background: none;
+  border: none;
+  font-family: var(--font-body);
+  font-size: 13px;
+  color: var(--sage-interactive);
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 16px;
+  transition: color 150ms, transform 200ms ease, opacity 200ms;
+}
+.phase-nav-btn .nav-arrow {
+  font-size: 16px;
+  line-height: 1;
+  transition: transform 200ms ease;
+}
+.phase-nav-btn:hover {
+  color: var(--sage);
+}
+.phase-nav-btn:hover .nav-arrow {
+  transform: translateY(2px);
+}
+.phase-nav-btn:focus-visible {
+  outline: 2px solid var(--sage);
+  outline-offset: 4px;
+  border-radius: 4px;
+}
+.phase:not(.phase-active) .phase-nav-btn {
+  display: none;
+}
+.sort-section .phase-nav-btn {
+  position: static;
+  transform: none;
+  flex-shrink: 0;
+  align-self: center;
+  margin: 0 0 32px;
+}
+
+/* ── Phase states ── */
+.phase {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow-y: auto; /* Allow internal scrolling within a phase */
+  transition: transform 400ms cubic-bezier(0.25, 0.1, 0.25, 1), opacity 250ms ease;
+}
+
+.phase-pending {
+  transform: translateY(100%);
+  opacity: 0;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.phase-active {
+  transform: translateY(0);
+  opacity: 1;
+  pointer-events: all;
+  z-index: 10;
+}
+
+.phase-completed {
+  transform: translateY(-100%);
+  opacity: 0;
+  pointer-events: none;
+  z-index: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .phase {
+    transition: opacity 100ms ease, transform 0ms;
+  }
+}
+
+/* ━━━━━━━━━━━━━━━━━━━━━━
+   PHASE 1: DUMP
+━━━━━━━━━━━━━━━━━━━━━━ */
+#phase-dump {
+  display: flex;
+  flex-direction: column;
+  background: var(--canvas-bg);
+}
+
+.dump-inner {
+  display: flex;
+  flex-direction: column;
+  width: min(600px, 100% - 48px);
+  margin: 0 auto;
+  height: 100%;
+}
+
+.dump-upper {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  padding-bottom: 24px;
+}
+
+.dump-title {
+  font-family: var(--font-display);
+  font-size: 24px;
+  font-weight: 500;
+  color: var(--text);
+  letter-spacing: -0.01em;
+  margin-bottom: 4px;
+}
+
+.dump-tagline {
+  font-family: var(--font-display);
+  font-size: 12px;
+  color: var(--sage-interactive);
+  letter-spacing: 0.02em;
+  margin-bottom: 0;
+}
+
+.dump-input-area {
+  flex-shrink: 0;
+}
+
+.dump-lower {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+.dump-lower::-webkit-scrollbar { display: none; }
+.dump-lower::after {
+  content: '';
+  display: block;
+  position: sticky;
+  bottom: 0;
+  height: 300px;
+  margin-top: -300px;
+  flex-shrink: 0;
+  background: linear-gradient(to bottom, transparent, var(--canvas-bg) 85%);
+  pointer-events: none;
+  z-index: 1;
+  opacity: 0;
+  transition: opacity 300ms;
+}
+.dump-lower.has-overflow::after {
+  opacity: 1;
+}
+
+.dump-input-wrap {
+  position: relative;
+}
+
+#dump-input {
+  width: 100%;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--sage-15);
+  padding: 12px 0;
+  font-family: var(--font-body);
+  font-size: 20px;
+  color: var(--text);
+  outline: none;
+  caret-color: var(--sage);
+  transition: border-color 200ms;
+  text-align: left;
+}
+
+/* When has tasks, always show the underline so input remains findable */
+.dump-input-wrap.has-value #dump-input {
+  border-bottom: 1px solid var(--sage-15);
+}
+
+#dump-input:focus {
+  border-bottom-color: transparent;
+}
+
+#dump-input::placeholder {
+  color: var(--text-muted);
+  font-style: normal;
+}
+
+/* Phase 4.4: animated underline expanding from center */
+.input-underline {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 0;
+  height: 2px;
+  background: var(--sage);
+  transition: width 500ms cubic-bezier(0.4, 0, 0.2, 1);
+  opacity: 0.3;
+  border-radius: 1px;
+}
+/* Underline shows during typewriter animation AND on focus */
+.dump-input-wrap.typewriter-active .input-underline,
+.dump-input-wrap:focus-within .input-underline {
+  width: 100%;
+}
+
+/* "Dump Tasks" inline hint — right side of input */
+.dump-input-hint {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  font-family: var(--font-display);
+  font-size: 11px;
+  color: var(--sage-label);
+  opacity: 0;
+  transition: opacity 200ms ease;
+  pointer-events: none;
+  letter-spacing: 0.04em;
+}
+/* Show hint ONLY when input has actual characters typed */
+.dump-input-wrap.has-input-text .dump-input-hint {
+  opacity: 0.5;
+}
+
+.existing-tasks-line {
+  display: none;
+  background: none;
+  border: none;
+  width: 100%;
+  font-family: var(--font-body);
+  font-size: 12px;
+  color: var(--text-dim);
+  cursor: pointer;
+  padding: 12px 0 0;
+  text-align: center;
+  letter-spacing: 0.01em;
+  transition: color 150ms;
+}
+.existing-tasks-line:hover { color: var(--sage); }
+.existing-tasks-line:focus-visible {
+  outline: 2px solid var(--sage);
+  outline-offset: 4px;
+  border-radius: 4px;
+}
+
+.dump-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 16px;
+  scrollbar-width: none;
+}
+.dump-cards::-webkit-scrollbar { display: none; }
+.dump-lower.has-overflow .dump-cards::after {
+  content: '';
+  display: block;
+  height: 150px;
+  flex-shrink: 0;
+}
+
+.dump-card {
+  background: var(--card-bg);
+  border-radius: var(--radius);
+  box-shadow: var(--card-shadow);
+  padding: 10px 14px;
+  font-size: 13px;
+  color: var(--text);
+  opacity: 0;
+  transform: translateY(-8px);
+  animation: cardSlideIn 100ms ease-out forwards;
+  display: flex;
+  align-items: center;
+  position: relative;
+}
+
+.dump-card .dump-delete {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  font-size: 14px;
+  line-height: 1;
+  color: var(--sage-25);
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 4px;
+  opacity: 0.4;
+  transition: opacity 150ms ease, color 150ms ease;
+  font-family: var(--font-body);
+}
+.dump-card:hover .dump-delete,
+.dump-card:focus-within .dump-delete {
+  opacity: 1;
+}
+.dump-card .dump-delete:hover {
+  color: var(--sage);
+}
+.dump-card .dump-delete:focus-visible {
+  outline: 2px solid var(--sage);
+  outline-offset: 2px;
+  border-radius: 4px;
+  opacity: 1;
+}
+
+.dump-card.example-card {
+  opacity: 0.5;
+  border: 1px dashed var(--sage-15);
+  box-shadow: none;
+}
+.dump-card.example-card .dump-delete { display: none; }
+
+.dump-card .card-text-dump { flex: 1; }
+
+@keyframes cardSlideIn {
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dump-card {
+    animation: cardFadeIn 80ms ease forwards;
+    transform: none;
+  }
+  @keyframes cardFadeIn {
+    to { opacity: 1; }
+  }
+}
+
+.dump-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 0 8px;
+  min-height: 48px;
+  align-items: center;
+  transition: opacity 200ms;
+}
+.has-tasks .dump-footer,
+.has-tasks .map-guide-content {
+  display: none;
+}
+
+/* Phase 4.3: "suggest tasks" button */
+#btn-suggest-tasks {
+  background: none;
+  border: none;
+  font-family: var(--font-body);
+  font-size: 13px;
+  color: var(--sage-interactive);
+  cursor: pointer;
+  padding: 4px 0;
+  letter-spacing: 0.01em;
+  transition: color 150ms;
+}
+#btn-suggest-tasks:hover { color: var(--sage); }
+#btn-suggest-tasks:focus-visible {
+  outline: 2px solid var(--sage);
+  outline-offset: 4px;
+  border-radius: 4px;
+}
+
+/* #btn-ready-sort — fixed at viewport bottom on dump page */
+#btn-ready-sort {
+  opacity: 0;
+  pointer-events: none;
+}
+#btn-ready-sort.visible {
+  opacity: 1;
+  pointer-events: all;
+}
+
+/* ━━━━━━━━━━━━━━━━━━━━━━
+   PHASE 2a: SORT IMPACT
+━━━━━━━━━━━━━━━━━━━━━━ */
+.sort-section {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  background: var(--canvas-bg);
+}
+
+.sort-inner {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex: 1 0 auto;
+  overflow: visible;
+  padding: 100px 0 100px;
+  justify-content: center;
+  justify-content: safe center;
+}
+
+.sort-progress {
+  font-family: var(--font-display);
+  font-size: 12px;
+  color: var(--sage-interactive);
+  margin-bottom: 24px;
+  letter-spacing: 0.02em;
+}
+
+.sort-header {
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 500;
+  color: var(--text);
+  line-height: 1.45;
+  margin-bottom: 28px;
+  white-space: pre-line;
+}
+
+/* Sort pass background tints */
+/* Phase tints — gradient edges blend seamlessly between pages */
+#phase-dump {
+  background: linear-gradient(
+    to bottom,
+    var(--canvas-bg) 0%,
+    var(--canvas-bg) 70%,
+    var(--canvas-bg) 100%
+  );
+}
+
+.sort-pass-impact {
+  background: linear-gradient(
+    to bottom,
+    var(--canvas-bg) 0%,
+    rgba(200, 140, 60, 0.035) 30%,
+    rgba(200, 140, 60, 0.035) 70%,
+    var(--canvas-bg) 100%
+  );
+}
+
+.sort-pass-effort {
+  background: linear-gradient(
+    to bottom,
+    var(--canvas-bg) 0%,
+    rgba(190, 170, 50, 0.03) 30%,
+    rgba(190, 170, 50, 0.03) 70%,
+    var(--canvas-bg) 100%
+  );
+}
+
+#phase-scatter {
+  background: linear-gradient(
+    to bottom,
+    var(--canvas-bg) 0%,
+    rgba(82, 99, 71, 0.02) 30%,
+    rgba(82, 99, 71, 0.02) 70%,
+    var(--canvas-bg) 100%
+  );
+}
+
+/* Phase 1.1: NO left border accents — removed */
+
+.sort-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: none;
+  position: relative;
+}
+
+.sort-card {
+  background: var(--card-bg);
+  border-radius: var(--radius);
+  box-shadow: var(--card-shadow);
+  padding: 10px 14px;
+  font-size: 13px;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: grab;
+  flex-shrink: 0;
+  min-height: 40px;
+  user-select: none;
+  touch-action: manipulation;
+  transition: box-shadow 150ms ease, transform 200ms cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+}
+
+.sort-card:active { cursor: grabbing; }
+
+.sort-card.dragging {
+  box-shadow: var(--card-shadow-lift);
+  opacity: 0.96;
+  z-index: 100;
+  cursor: grabbing;
+  transition: box-shadow 150ms ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sort-card { transition: none; }
+}
+
+/* Long-press charging feedback (touch drag without handle) */
+@keyframes lp-charge {
+  from { transform: scale(1); }
+  to   { transform: scale(1.02); box-shadow: 0 2px 8px rgba(46, 52, 45, 0.10); }
+}
+.sort-card.long-press-charging,
+.canvas-card.long-press-charging {
+  animation: lp-charge 400ms ease-out forwards;
+}
+@media (prefers-reduced-motion: reduce) {
+  .sort-card.long-press-charging,
+  .canvas-card.long-press-charging { animation: none; }
+}
+
+.sort-card .rank {
+  font-family: var(--font-display);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--sage-interactive);
+  min-width: 18px;
+  text-align: right;
+}
+
+.sort-card .handle {
+  color: var(--sage-25);
+  font-size: 14px;
+  line-height: 1;
+  cursor: grab;
+  padding: 8px;
+  margin: -8px;
+  touch-action: none;
+}
+
+.sort-card .card-text {
+  flex: 1;
+  font-size: 16px;
+  transform: scale(0.8125);
+  transform-origin: left center;
+}
+
+/* ── Swipe-to-delete wrapper ── */
+.sort-card-wrap {
+  position: relative;
+  overflow: visible;
+  border-radius: var(--radius);
+  flex-shrink: 0;
+}
+
+
+
+/* ━━━━━━━━━━━━━━━━━━━━━━
+   PHASE 3: SCATTER
+━━━━━━━━━━━━━━━━━━━━━━ */
+#phase-scatter {
+  background: var(--canvas-bg);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden; /* scatter should not internally scroll */
+}
+
+.scatter-canvas {
+  position: relative;
+  flex: 1;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* Dot grid — fades at edges via mask, doesn't affect cards/labels */
+.scatter-canvas::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(circle, rgba(82, 99, 71, 0.15) 1px, transparent 1px);
+  background-size: 20px 20px;
+  -webkit-mask-image: radial-gradient(ellipse 70% 70% at center, black 40%, transparent 80%);
+  mask-image: radial-gradient(ellipse 70% 70% at center, black 40%, transparent 80%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* SVG quadrant lines — also fade at edges */
+.quadrant-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  -webkit-mask-image: radial-gradient(ellipse 70% 70% at center, black 40%, transparent 80%);
+  mask-image: radial-gradient(ellipse 70% 70% at center, black 40%, transparent 80%);
+}
+
+.q-line {
+  stroke: var(--sage-20);
+  stroke-width: 1;
+  fill: none;
+  stroke-dasharray: 1000;
+  stroke-dashoffset: 1000;
+}
+
+.q-line.drawn {
+  transition: stroke-dashoffset 300ms cubic-bezier(0.4, 0, 0.2, 1);
+  stroke-dashoffset: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .q-line.drawn {
+    transition: none;
+    stroke-dashoffset: 0;
+  }
+}
+
+/* Quadrant corner labels */
+.corner-label {
+  position: absolute;
+  font-family: var(--font-display);
+  color: var(--sage-label);
+  letter-spacing: 0.04em;
+  font-weight: 600;
+  white-space: nowrap;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 2px 4px;
+  font-size: 14px;
+  z-index: 5;
+}
+.corner-label:hover {
+  color: var(--sage);
+}
+.corner-label.now {
+  top: 32px;
+  right: 32px;
+}
+.corner-label.soon {
+  color: var(--sage-interactive);
+  top: 32px;
+  left: 32px;
+}
+.corner-label.quick {
+  bottom: 56px;
+  right: 32px;
+}
+.corner-label.later {
+  bottom: 56px;
+  left: 32px;
+}
+
+/* Quadrant hints — below their label */
+.corner-hint {
+  position: absolute;
+  font-family: var(--font-body);
+  font-size: 11px;
+  color: var(--sage-45);
+  pointer-events: none;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  z-index: 5;
+}
+.corner-hint.now { top: 52px; right: 36px; }
+.corner-hint.soon { top: 52px; left: 36px; }
+.corner-hint.quick { bottom: 40px; right: 36px; }
+.corner-hint.later { bottom: 40px; left: 36px; }
+
+/* Interaction hints — top-left, below "Soon" hint */
+.interaction-hints {
+  position: absolute;
+  top: 100px;
+  left: 32px;
+  z-index: 0;
+  pointer-events: auto;
+}
+.tips-toggle {
+  background: none;
+  border: none;
+  padding: 0;
+  font-family: var(--font-body);
+  font-size: 11px;
+  color: var(--sage-45);
+  cursor: pointer;
+  line-height: 1.5;
+}
+.tips-content {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 80px;
+  opacity: 1;
+  overflow: hidden;
+  transition: max-height 400ms ease, opacity 300ms ease;
+}
+.interaction-hint {
+  font-family: var(--font-body);
+  font-size: 11px;
+  color: var(--sage-45);
+  white-space: nowrap;
+  line-height: 1.5;
+}
+.interaction-hints.collapsed .tips-content { max-height: 0; opacity: 0; }
+.interaction-hints.collapsed:hover .tips-content,
+.interaction-hints.collapsed:focus-within .tips-content { max-height: 80px; opacity: 1; }
+
+/* Axis labels — away from corners */
+.axis-label {
+  position: absolute;
+  font-family: var(--font-display);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--sage-label);
+  pointer-events: none;
+  z-index: 5;
+}
+.axis-urgent {
+  top: calc(50% + 12px);
+  right: 32px;
+}
+.axis-important {
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+/* Quadrant regions for accessibility */
+.quadrant-region {
+  position: absolute;
+  pointer-events: none;
+}
+
+/* Corner popovers */
+.corner-popover {
+  position: absolute;
+  background: #edeee7;
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-family: var(--font-body);
+  font-size: 12px;
+  color: var(--text);
+  line-height: 1.5;
+  max-width: 240px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 200ms ease;
+  z-index: 50;
+}
+.corner-popover.open {
+  opacity: 1;
+  pointer-events: all;
+}
+.now-popover { top: 68px; right: 32px; }
+.soon-popover { top: 68px; left: 32px; }
+.quick-popover { bottom: 72px; right: 32px; }
+.later-popover { bottom: 72px; left: 32px; }
+
+/* Canvas cards */
+.canvas-card {
+  position: absolute;
+  background: var(--card-bg);
+  border-radius: var(--radius);
+  box-shadow: var(--card-shadow);
+  padding: 10px 14px;
+  font-family: var(--font-body);
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  touch-action: manipulation;
+  white-space: normal;
+  word-break: break-word;
+  max-width: 200px;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  transition: box-shadow 180ms ease, background 150ms ease;
+  z-index: 1;
+}
+
+@media (hover: hover) {
+  .canvas-card:hover {
+    background: #fafaf5;
+    box-shadow: 0 2px 8px rgba(46, 52, 45, 0.10);
+  }
+}
+
+.canvas-card .canvas-handle {
+  color: var(--sage-25);
+  font-size: 14px;
+  line-height: 1;
+  cursor: grab;
+  padding: 8px 2px 8px 6px;
+  margin: -8px -10px -8px 0;
+  touch-action: none;
+  opacity: 0;
+  transition: opacity 150ms ease;
+  flex-shrink: 0;
+}
+.canvas-card:hover .canvas-handle { opacity: 1; }
+.canvas-card .canvas-handle:active { cursor: grabbing; }
+@media (pointer: coarse) {
+  .canvas-card .canvas-handle {
+    opacity: 1;
+    padding: 15px 6px 15px 12px;
+    margin: -15px -10px -15px 0;
+  }
+}
+
+.canvas-card:focus-visible {
+  outline: 2px solid var(--sage);
+  outline-offset: 3px;
+}
+
+.canvas-card.grabbing {
+  box-shadow: var(--card-shadow-lift);
+  z-index: 100;
+  cursor: grabbing;
+}
+
+/* Strikethrough overlay — sharpie-drawn SVG */
+.card-strike {
+  position: absolute;
+  top: 0;
+  left: 10px;
+  right: 10px;
+  bottom: 0;
+  pointer-events: none;
+  overflow: visible;
+}
+.card-strike svg {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.card-strike .strike-path {
+  stroke: #2e342d;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  fill: none;
+  transition: stroke-dashoffset 300ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.canvas-card.done .card-text {
+  opacity: 0.35;
+  transition: opacity 300ms ease;
+}
+
+.canvas-card.done .card-strike .strike-path {
+  opacity: 0.35;
+  transition: opacity 300ms ease;
+}
+
+.canvas-card:not(.done) .card-text {
+  opacity: 1;
+  transition: opacity 300ms ease;
+}
+.card-text[contenteditable="true"] {
+  font-size: 16px;
+  transform: scale(0.8125);
+  transform-origin: left top;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card-strike .strike-path {
+    transition: none;
+  }
+  .canvas-card.done .card-text {
+    opacity: 0.35;
+    transition: opacity 150ms ease;
+  }
+  .canvas-card.grabbing {
+    transition: box-shadow 90ms ease;
+  }
+}
+
+/* ── Phase 4.1: Timeline Scrubber — compact, bottom-right ── */
+.timeline-scrubber {
+  position: absolute;
+  bottom: 12px;
+  right: 16px;
+  width: 140px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  opacity: 0.4;
+  transition: opacity 200ms;
+  z-index: 40;
+}
+.timeline-scrubber:hover { opacity: 0.7; }
+
+.scrubber-label {
+  font-family: var(--font-display);
+  font-size: 7px;
+  color: var(--sage-45);
+  white-space: nowrap;
+  letter-spacing: 0.04em;
+}
+
+.scrubber-track-wrap {
+  flex: 1;
+  position: relative;
+  height: 16px;
+  display: flex;
+  align-items: center;
+}
+
+.scrubber-track {
+  width: 100%;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--sage-08);
+  position: relative;
+}
+
+.scrubber-fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 100%;
+  width: 65%;
+  background: var(--sage-15);
+  border-radius: 1px;
+}
+
+.scrubber-handle {
+  position: absolute;
+  left: 65%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: white;
+  box-shadow: 0 1px 3px rgba(46, 52, 45, 0.12), 0 0 0 1px var(--sage-15);
+  cursor: pointer;
+}
+.scrubber-handle::before {
+  content: '';
+  position: absolute;
+  inset: -17px;
+  border-radius: 50%;
+}
+
+.scrubber-handle:focus-visible {
+  outline: 2px solid var(--sage);
+  outline-offset: 3px;
+}
+
+/* ── Empty state ── */
+.empty-state {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 16px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 200ms;
+}
+.empty-state.visible { opacity: 1; }
+.empty-state p {
+  font-family: var(--font-display);
+  font-size: 14px;
+  color: var(--text-muted);
+  text-align: center;
+  line-height: 1.6;
+  white-space: pre-line;
+}
+
+/* ── Canvas utility buttons — bottom left ── */
+.canvas-util-wrap {
+  position: absolute;
+  bottom: 12px;
+  right: 16px;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 200ms;
+}
+.canvas-util-wrap.visible {
+  opacity: 1;
+  pointer-events: all;
+}
+
+.canvas-util-btn {
+  background: none;
+  border: none;
+  font-family: var(--font-body);
+  font-size: 11px;
+  color: var(--sage-interactive);
+  cursor: pointer;
+  padding: 4px 0;
+  letter-spacing: 0.02em;
+  transition: color 150ms;
+}
+.canvas-util-btn:hover { color: var(--sage); }
+.canvas-util-btn:focus-visible {
+  outline: 2px solid var(--sage);
+  outline-offset: 4px;
+  border-radius: 4px;
+}
+.canvas-util-sep {
+  color: var(--text-ghost);
+  font-size: 11px;
+  margin: 0 2px;
+  user-select: none;
+}
+
+/* ── Aria live region ── */
+#aria-live {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0,0,0,0);
+  white-space: nowrap;
+}
+
+/* ── Phase 4.2: canvas toolbar �� bottom center ── */
+.canvas-toolbar {
+  position: absolute;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 200ms;
+}
+.canvas-toolbar.visible {
+  opacity: 1;
+  pointer-events: all;
+}
+.toolbar-btn {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: none;
+  background: var(--card-bg);
+  box-shadow: 0 2px 8px rgba(46,52,45,0.12);
+  color: var(--sage-45);
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  letter-spacing: 0;
+  line-height: 1;
+  text-align: center;
+  font-family: var(--font-body);
+  font-size: 18px;
+  transition: box-shadow 150ms, color 150ms;
+}
+@media (hover: hover) {
+  .toolbar-btn:hover {
+    color: var(--sage);
+    box-shadow: 0 4px 12px rgba(46,52,45,0.18);
+  }
+}
+.toolbar-btn:focus-visible {
+  outline: 2px solid var(--sage);
+  outline-offset: 3px;
+}
+.toolbar-btn-add {
+  line-height: 0;
+}
+.toolbar-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+.toolbar-label {
+  font-size: 11px;
+  color: var(--sage-45);
+  line-height: 1;
+  letter-spacing: 0.01em;
+}
+
+.canvas-add-input-wrap {
+  position: absolute;
+  bottom: 68px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 210;
+  background: var(--card-bg);
+  border-radius: var(--radius);
+  box-shadow: var(--card-shadow-lift);
+  padding: 8px 12px;
+  display: none;
+  width: 200px;
+}
+.canvas-add-input-wrap.visible { display: flex; }
+.canvas-add-input {
+  width: 100%;
+  border: none;
+  border-bottom: 1px solid var(--sage-15);
+  background: transparent;
+  font-family: var(--font-body);
+  font-size: 16px;
+  color: var(--text);
+  padding: 4px 0;
+  outline: none;
+  caret-color: var(--sage);
+}
+.canvas-add-input::placeholder {
+  color: var(--text-muted);
+}
+.canvas-add-input:focus-visible {
+  outline: none;
+}
+
+/* ── Typewriter animation for hero input ── */
+.typewriter {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  transform: translateY(-50%);
+  font-family: var(--font-body);
+  font-size: 20px;
+  color: var(--text-muted);
+  pointer-events: all;
+  cursor: text;
+  white-space: nowrap;
+  overflow: hidden;
+  border-right: 2px solid var(--sage-50);
+  animation: cursorBlink 1s step-start infinite;
+  transition: color 200ms ease;
+}
+
+/* Hover on the entire input-wrap area, not just the text */
+.dump-input-wrap:hover .typewriter {
+  color: var(--text-dim);
+}
+
+.dump-input-wrap:focus-within .typewriter,
+.dump-input-wrap.has-value .typewriter {
+  display: none;
+}
+
+@keyframes cursorBlink {
+  0%, 100% { border-right-color: var(--sage-50); }
+  50% { border-right-color: transparent; }
+}
+
+/* ── Focus ring ── */
+button:focus-visible {
+  outline: 2px solid var(--sage);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+
+/* (dump-intro removed — replaced by dump-title + dump-tagline) */
+
+/* Sort tips */
+.sort-tip {
+  text-align: center;
+  padding: 12px 0 4px;
+  min-height: 32px;
+  overflow: hidden;
+  position: relative;
+}
+.sort-tip-text {
+  font-family: var(--font-body);
+  font-size: 11px;
+  color: var(--sage-45);
+  line-height: 1.5;
+  display: block;
+  animation: tipSlideUp 600ms ease forwards;
+}
+
+@keyframes tipSlideUp {
+  0% {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  20% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  80% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes tipSlideOut {
+  0% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sort-tip-text {
+    animation: none;
+    opacity: 1;
+  }
+}
+
+/* Map guide */
+.map-guide-toggle {
+  background: none;
+  border: none;
+  font-family: var(--font-body);
+  font-size: 13px;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--sage-interactive);
+  cursor: pointer;
+  padding: 4px 0;
+  transition: color 150ms;
+}
+.map-guide-toggle:hover { color: var(--sage); }
+.map-guide-content {
+  background: none;
+  border-radius: 0;
+  padding: 0;
+  max-width: 320px;
+  max-height: 0;
+  overflow: hidden;
+  opacity: 0;
+  transition: max-height 300ms ease, opacity 200ms ease, padding 300ms ease;
+  pointer-events: none;
+  margin-top: 4px;
+}
+.map-guide-content.open {
+  max-height: 300px;
+  opacity: 1;
+  padding: 16px 0;
+  pointer-events: all;
+}
+.map-guide-content p {
+  font-family: var(--font-body);
+  font-size: 13px;
+  color: var(--sage-interactive);
+  line-height: 1.6;
+  margin-bottom: 10px;
+}
+.map-guide-content p:last-of-type { margin-bottom: 12px; }
+.map-guide-close {
+  background: none;
+  border: none;
+  font-family: var(--font-body);
+  font-size: 11px;
+  color: var(--sage-interactive);
+  cursor: pointer;
+  padding: 2px 0;
+  transition: color 150ms;
+}
+.map-guide-close:hover { color: var(--sage); }
+
+/* ── Fix 7: Sort phase vertical centering ── */
+.sort-inner > .sort-progress,
+.sort-inner > .sort-header,
+.sort-inner > .sort-list,
+.sort-inner > .sort-tip {
+  width: min(520px, 100% - 48px);
+}
+
+/* (reduced-motion for scroll behavior removed — viewport is locked) */
+
+/* ── Mobile: touch devices ── */
+@media (pointer: coarse) {
+  .dump-card .dump-delete {
+    opacity: 0.5;
+  }
+  .dump-card .dump-delete:active {
+    opacity: 1;
+    color: var(--sage);
+  }
+  .phase-nav-btn:active { color: var(--sage); }
+  .phase-nav-btn:active .nav-arrow { transform: translateY(2px); }
+  .corner-label:active { color: var(--sage); }
+  #btn-suggest-tasks:active { color: var(--sage); }
+  .toolbar-btn:active { color: var(--sage); box-shadow: 0 4px 12px rgba(46,52,45,0.18); }
+  .map-guide-toggle:active { color: var(--sage); }
+  .map-guide-close:active { color: var(--sage); }
+  .corner-label { padding: 12px 16px; }
+  .corner-label.now { top: 20px; right: 20px; }
+  .corner-label.soon { top: 20px; left: 20px; }
+  .corner-label.quick { bottom: 44px; right: 20px; }
+  .corner-label.later { bottom: 44px; left: 20px; }
+  .interaction-hints { top: 58px; left: 20px; }
+  .dump-card .dump-delete { min-width: 44px; min-height: 44px; display: flex; align-items: center; justify-content: center; }
+  .sort-card .handle { padding: 15px; margin: -15px; }
+  .phase-nav-btn { padding: 14px 24px; }
+  .keyboard-open .phase-nav-btn {
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 150ms ease;
+  }
+  .keyboard-open .canvas-toolbar {
+    opacity: 0 !important;
+    pointer-events: none !important;
+  }
+  .keyboard-open .canvas-add-input-wrap {
+    bottom: auto;
+    top: 40%;
+  }
+}
+
+/* ── History Timeline Widget ── */
+.history-timeline {
+  position: absolute;
+  bottom: 20px;
+  right: 204px;
+  z-index: 40;
+  display: none;
+  opacity: 0.45;
+  transition: opacity 200ms;
+}
+.history-timeline:hover { opacity: 0.85; }
+.history-timeline.has-history { display: block; }
+
+/* 20 + 8 + 144 + 8 + 20 = 200px shell */
+.history-shell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 200px;
+}
+
+.h-ov-btn {
+  width: 20px;
+  height: 16px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+.h-ov-btn:hover { opacity: 0.45; }
+.h-ov-btn.hidden { opacity: 0; pointer-events: none; }
+
+/* 5 slots × 16px dot + 4 × 16px connector = 144px */
+.history-viewport {
+  width: 144px;
+  flex-shrink: 0;
+  overflow: hidden;
+  padding-top: 28px;
+  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.history-viewport.dragging { cursor: grabbing; }
+
+.history-track {
+  display: flex;
+  align-items: flex-end;
+  width: max-content;
+  will-change: transform;
+}
+
+.h-connector { width: 16px; height: 16px; flex-shrink: 0; display: block; }
+
+.h-entry {
+  width: 16px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  cursor: pointer;
+  position: relative;
+}
+.h-entry-label {
+  font-size: 10.5px;
+  letter-spacing: -0.2px;
+  line-height: 15px;
+  font-family: var(--font-display);
+  white-space: nowrap;
+  pointer-events: none;
+  color: var(--sage);
+  opacity: 0;
+  position: absolute;
+  bottom: calc(16px + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  transition: opacity 0.2s ease;
+}
+.h-entry.is-selected .h-entry-label { opacity: 0.6; }
+.h-dot-circle { fill: #9EA797; transition: fill 0.22s ease; }
+.h-entry.is-selected .h-dot-circle { fill: var(--sage); }
+.h-entry svg { display: block; width: 16px; height: 16px; flex-shrink: 0; }
+.h-entry-label.anchor-left { left: 0; transform: none; }
+.h-entry-label.anchor-right { left: auto; right: 0; transform: none; }
+
+/* Ghost cards — historical tasks no longer in live state */
+.canvas-card.ghost-card {
+  opacity: 0;
+  pointer-events: none;
+  border: 1px dashed rgba(82, 99, 71, 0.2);
+  box-shadow: none;
+  background: rgba(255, 255, 255, 0.6);
+}
+.canvas-card.ghost-card .canvas-handle { display: none; }
+.canvas-card.ghost-card .card-strike { display: none; }
+.canvas-card.ghost-card.done .card-text {
+  text-decoration: line-through;
+  opacity: 0.4;
+}
+
+/* History view mode — disable card interactions */
+#scatter-canvas.history-view .canvas-card:not(.ghost-card) {
+  cursor: default !important;
+}
+#scatter-canvas.history-view .canvas-toolbar {
+  opacity: 0.2 !important;
+  pointer-events: none !important;
+}
+#scatter-canvas.history-view .canvas-util-wrap {
+  opacity: 0.2;
+  pointer-events: none;
+}
+
+/* ── Mobile: narrow screens ── */
+@media (max-width: 480px) {
+  .dump-inner { width: min(600px, 100% - 32px); }
+  .sort-inner > .sort-progress,
+  .sort-inner > .sort-header,
+  .sort-inner > .sort-list,
+  .sort-inner > .sort-tip { width: min(520px, 100% - 32px); }
+  .sort-header { font-size: 16px !important; }
+  .canvas-card { max-width: 160px; }
+  .corner-label { font-size: 12px; padding: 12px 14px; min-width: 44px; min-height: 44px; display: flex; align-items: center; justify-content: center; }
+  .corner-label.now, .corner-label.soon { top: 8px; }
+  .corner-label.quick, .corner-label.later { bottom: 28px; }
+  .corner-label.now, .corner-label.quick { right: 8px; }
+  .corner-label.soon, .corner-label.later { left: 8px; }
+  .corner-hint { display: none; }
+  .interaction-hints { top: 56px; left: 22px; }
+  .interaction-hint { font-size: 12px; }
+  .tips-toggle { font-size: 12px; }
+  .axis-label { font-size: 9px; }
+  .axis-urgent { right: 8px; top: calc(50% + 6px); }
+  .axis-important { top: 6px; }
+  .dump-cards { gap: 4px; }
+  .sort-list { gap: 4px; }
+  .toolbar-label { display: none; }
+}
+</style>
+</head>
+<body>
+
+<h1 class="sr-only">Your impact and effort map</h1>
+<div id="aria-live" aria-live="polite" aria-atomic="true"></div>
+
+<div class="flow-container">
+
+  <!-- ═══════════════════════════════════════
+       PHASE 1: DUMP
+  ═══════════════════════════════════════ -->
+  <section id="phase-dump" class="phase phase-active" aria-label="Brain dump — add everything on your mind">
+    <div class="dump-inner" id="dump-inner">
+      <div class="dump-upper">
+        <h2 class="dump-title">Impact · Effort Map</h2>
+        <p class="dump-tagline">Find your quick wins.</p>
+      </div>
+
+      <div class="dump-input-area">
+        <div class="dump-input-wrap">
+          <input
+            type="text"
+            id="dump-input"
+            placeholder=""
+            aria-label="Add a task"
+            autocomplete="off"
+            autocorrect="off"
+          >
+          <span class="typewriter" id="typewriter" aria-hidden="true"></span>
+          <span class="dump-input-hint">Dump Tasks &#8629;</span>
+          <div class="input-underline"></div>
+        </div>
+        <button class="existing-tasks-line" id="existing-tasks-line" aria-label="Show my tasks">show my tasks</button>
+      </div>
+
+      <div class="dump-lower">
+        <div class="dump-cards" id="dump-cards" role="list" aria-label="Tasks added"></div>
+        <div class="dump-footer">
+          <button class="map-guide-toggle" id="map-guide-toggle">how does this work?</button>
+          <button id="btn-suggest-tasks" aria-label="Suggest example tasks">suggest tasks</button>
+        </div>
+        <div class="map-guide-content" id="map-guide-content">
+          <p>Once everything is out of your head, it's easier to see what's worth doing.</p>
+          <p>Two quick sorts, one for impact and one for effort, spread your tasks across a grid.</p>
+          <p>Quick wins rise to the top-left. Time-sinks fall to the bottom-right.</p>
+          <!-- close button removed — user clicks toggle again to collapse -->
+        </div>
+      </div>
+    </div>
+    <button class="phase-nav-btn" id="btn-ready-sort" aria-label="Ready to sort your tasks">
+      <span class="nav-label">ready to sort</span>
+      <span class="nav-arrow" aria-hidden="true">&#8595;</span>
+    </button>
+  </section>
+
+  <!-- ═══════════════════════════════════════
+       PHASE 2a: SORT IMPACT
+  ═══════════════════════════════════════ -->
+  <section id="phase-sort-impact" class="phase phase-pending sort-section sort-pass-impact" aria-label="Sort tasks by impact" aria-hidden="true">
+    <div class="sort-inner" id="impact-inner">
+      <div class="sort-progress" aria-live="polite">step 1 of 2 · impact</div>
+      <h2 class="sort-header">Drag to rank by impact.
+Biggest payoff at the top.</h2>
+      <div
+        id="sort-list-impact"
+        class="sort-list"
+        role="list"
+        aria-label="Tasks to sort by impact. Drag to reorder."
+      ></div>
+      <div class="sort-tip" id="sort-tip-impact" aria-live="polite">
+        <span class="sort-tip-text"></span>
+      </div>
+    </div>
+    <button class="phase-nav-btn" id="btn-impact-done" aria-label="Done sorting impact">
+      <span class="nav-label">done sorting</span>
+      <span class="nav-arrow" aria-hidden="true">&#8595;</span>
+    </button>
+  </section>
+
+  <!-- ═══════════════════════════════════════
+       PHASE 2b: SORT EFFORT
+  ═══════════════════════════════════════ -->
+  <section id="phase-sort-effort" class="phase phase-pending sort-section sort-pass-effort" aria-label="Sort tasks by effort" aria-hidden="true">
+    <div class="sort-inner" id="effort-inner">
+      <div class="sort-progress" aria-live="polite">step 2 of 2 · effort</div>
+      <h2 class="sort-header">Drag to rank by effort.
+Hardest and most time-consuming at the top.</h2>
+      <div
+        id="sort-list-effort"
+        class="sort-list"
+        role="list"
+        aria-label="Tasks to sort by effort. Drag to reorder."
+      ></div>
+      <div class="sort-tip" id="sort-tip-effort" aria-live="polite">
+        <span class="sort-tip-text"></span>
+      </div>
+    </div>
+    <button class="phase-nav-btn" id="btn-effort-done" aria-label="Done sorting effort">
+      <span class="nav-label">done sorting</span>
+      <span class="nav-arrow" aria-hidden="true">&#8595;</span>
+    </button>
+  </section>
+
+  <!-- ═══════════════════════════════════════
+       PHASE 3: SCATTER
+  ═══════════════════════════════════════ -->
+  <section id="phase-scatter" class="phase phase-pending" aria-label="Your tasks on the map" aria-hidden="true">
+    <h2 class="sr-only">Your grid</h2>
+    <div class="scatter-canvas" id="scatter-canvas">
+      <svg class="quadrant-svg" id="quadrant-svg" aria-hidden="true">
+        <line id="vline-up" class="q-line" x1="50%" y1="50%" x2="50%" y2="0%"/>
+        <line id="vline-down" class="q-line" x1="50%" y1="50%" x2="50%" y2="100%"/>
+        <line id="hline-left" class="q-line" x1="50%" y1="50%" x2="0%" y2="50%"/>
+        <line id="hline-right" class="q-line" x1="50%" y1="50%" x2="100%" y2="50%"/>
+      </svg>
+
+      <div class="quadrant-region" id="q-now" style="top:0;right:0;width:50%;height:50%;" role="region" aria-label="Big Bets — high impact, high effort"></div>
+      <div class="quadrant-region" id="q-soon" style="top:0;left:0;width:50%;height:50%;" role="region" aria-label="Quick Wins — high impact, low effort"></div>
+      <div class="quadrant-region" id="q-quick" style="bottom:0;right:0;width:50%;height:50%;" role="region" aria-label="Thankless — low impact, high effort"></div>
+      <div class="quadrant-region" id="q-later" style="bottom:0;left:0;width:50%;height:50%;" role="region" aria-label="Fill-ins — low impact, low effort"></div>
+
+      <button class="corner-label now" aria-label="Big Bets — high impact, high effort">Big Bets</button>
+      <div class="corner-popover now-popover" aria-hidden="true">High impact, but expensive. Worth doing — plan them, break them into steps, and schedule real time. Don't start them on a whim.</div>
+      <button class="corner-label soon" aria-label="Quick Wins — high impact, low effort">Quick Wins</button>
+      <div class="corner-popover soon-popover" aria-hidden="true">High impact for little effort. The best use of your time. Do these first — they pay off fast.</div>
+      <button class="corner-label quick" aria-label="Thankless — low impact, high effort">Thankless</button>
+      <div class="corner-popover quick-popover" aria-hidden="true">Lots of effort for little payoff. Avoid these when you can. If one is unavoidable, minimize it or hand it off.</div>
+      <button class="corner-label later" aria-label="Fill-ins — low impact, low effort">Fill-ins</button>
+      <div class="corner-popover later-popover" aria-hidden="true">Low impact, low effort. Fine for spare moments, but don't let them crowd out the quick wins. Drop the ones that don't matter.</div>
+
+      <span class="corner-hint now" aria-hidden="true">plan &amp; commit</span>
+      <span class="corner-hint soon" aria-hidden="true">do these first</span>
+      <span class="corner-hint quick" aria-hidden="true">avoid or hand off</span>
+      <span class="corner-hint later" aria-hidden="true">do if time allows</span>
+
+      <div class="interaction-hints" id="interaction-hints" aria-hidden="true">
+        <button class="tips-toggle" id="tips-toggle">tips</button>
+        <div class="tips-content">
+          <span class="interaction-hint">tap to complete</span>
+          <span class="interaction-hint">double-tap to edit</span>
+          <span class="interaction-hint">drag ⠇ to reorder</span>
+        </div>
+      </div>
+
+      <span class="axis-label axis-urgent" aria-hidden="true">effort &#8594;</span>
+      <span class="axis-label axis-important" aria-hidden="true">impact &#8593;</span>
+
+      <div class="empty-state" id="empty-state">
+        <p>Nothing here yet.
+Start by adding what's on your mind.</p>
+      </div>
+
+      <!-- Canvas toolbar — bottom center -->
+      <div class="canvas-toolbar" id="canvas-toolbar">
+        <div class="canvas-add-input-wrap" id="canvas-add-input-wrap">
+          <input type="text" class="canvas-add-input" id="canvas-add-input" placeholder="add a task" aria-label="Add a new task to the map" autocomplete="off">
+        </div>
+        <div class="toolbar-item">
+          <button class="toolbar-btn toolbar-btn-add" id="btn-back-to-top" aria-label="Back to the top" title="Back to the top"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true"><line x1="5" y1="3" x2="15" y2="3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><line x1="10" y1="16" x2="10" y2="7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><polyline points="5,12 10,7 15,12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></button>
+          <span class="toolbar-label">back to top</span>
+        </div>
+        <div class="toolbar-item">
+          <button class="toolbar-btn toolbar-btn-add" id="canvas-add-btn" aria-label="Add new tasks" title="Add new tasks"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true"><line x1="10" y1="3" x2="10" y2="17" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><line x1="3" y1="10" x2="17" y2="10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button>
+          <span class="toolbar-label">add</span>
+        </div>
+        <div class="toolbar-item">
+          <button class="toolbar-btn toolbar-btn-add" id="btn-cleanup" aria-label="Clean up completed tasks" title="Clean up completed tasks"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true"><line x1="10" y1="2" x2="10" y2="12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><line x1="6" y1="12" x2="14" y2="12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><line x1="7" y1="12" x2="6" y2="18" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><line x1="10" y1="12" x2="10" y2="18" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><line x1="13" y1="12" x2="14" y2="18" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button>
+          <span class="toolbar-label">clean up</span>
+        </div>
+      </div>
+
+      <!-- Utility buttons — bottom left -->
+      <div class="canvas-util-wrap" id="canvas-util-wrap">
+        <button class="canvas-util-btn" id="btn-export" aria-label="Export your map as a file">export</button>
+        <span class="canvas-util-sep" aria-hidden="true">·</span>
+        <button class="canvas-util-btn" id="btn-import" aria-label="Import a previously exported map file">import</button>
+        <input type="file" id="import-file-input" accept=".json" style="display:none" aria-hidden="true">
+      </div>
+
+      <!-- History Timeline — bottom right, left of corner hints -->
+      <div class="history-timeline" id="history-timeline" aria-label="Map history">
+        <div class="history-shell">
+          <div class="h-ov-btn hidden" id="h-btn-left" aria-label="View older snapshot">
+            <svg viewBox="0 0 12 12" width="12" height="12" fill="none" aria-hidden="true">
+              <path d="M7.5 4L4.5 6.18182L7.5 8" stroke="#D8D8D8" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </div>
+          <div class="history-viewport" id="h-viewport">
+            <div class="history-track" id="h-track"></div>
+          </div>
+          <div class="h-ov-btn hidden" id="h-btn-right" aria-label="View newer snapshot">
+            <svg viewBox="0 0 12 12" width="12" height="12" fill="none" aria-hidden="true">
+              <path d="M4.5 4L7.5 6.18182L4.5 8" stroke="#D8D8D8" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</div><!-- .flow-container -->
+
+<script src="app.js"></script>
+</body>
+</html>
