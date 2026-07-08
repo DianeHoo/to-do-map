@@ -987,10 +987,15 @@ function buildCanvasCards(rm) {
     const card = document.createElement('div');
     card.className = 'canvas-card' + (state.done.has(task.id) ? ' done' : '');
     card.dataset.id = task.id;
-    card.tabIndex = 0;
-    card.setAttribute('role', 'button');
-    card.setAttribute('aria-pressed', state.done.has(task.id) ? 'true' : 'false');
-    card.setAttribute('aria-label', `${task.text}${state.done.has(task.id) ? ', done' : ''} — click to toggle done`);
+    if (window.SHARED_VIEW_ACTIVE) {
+      // Read-only shared view: cards are plain content, not buttons
+      card.setAttribute('aria-label', `${task.text}${state.done.has(task.id) ? ', done' : ''}`);
+    } else {
+      card.tabIndex = 0;
+      card.setAttribute('role', 'button');
+      card.setAttribute('aria-pressed', state.done.has(task.id) ? 'true' : 'false');
+      card.setAttribute('aria-label', `${task.text}${state.done.has(task.id) ? ', done' : ''} — click to toggle done`);
+    }
     card.style.left = pos.x + 'px';
     card.style.top = pos.y + 'px';
     card.style.opacity = '0';
@@ -1113,6 +1118,7 @@ function buildCanvasCards(rm) {
     });
 
     card.addEventListener('keydown', e => {
+      if (window.SHARED_VIEW_ACTIVE) return;
       if (e.key === 'Enter' || e.key === ' ') {
         e.preventDefault();
         onCanvasCardTap(card, task.id);
@@ -1259,6 +1265,7 @@ function resetIOSZoom() {
 }
 
 function onCanvasCardTap(card, id) {
+  if (window.SHARED_VIEW_ACTIVE) return;
   const isDone = state.done.has(id);
   const text = getTaskText(id);
   const strikePath = card.querySelector('.strike-path');
@@ -1756,6 +1763,9 @@ function setupLongPressDrag(card, id) {
 const LS_KEY = 'eisenhower-matrix-state';
 
 function saveState() {
+  // Never persist while viewing someone else's shared map — it would
+  // overwrite this visitor's own local board.
+  if (window.SHARED_VIEW_ACTIVE) return;
   try {
     const serializable = {
       tasks: state.tasks,
@@ -1777,6 +1787,9 @@ function loadSavedState() {
     if (!raw) return false;
     const saved = JSON.parse(raw);
     if (!saved || !saved.tasks || !saved.phase) return false;
+    // Data written by the impact/effort variant under the legacy shared key —
+    // not ours to load; that page migrates it to its own key on next visit.
+    if ('impactOrder' in saved) return false;
     state.tasks = saved.tasks;
     state.urgencyOrder = saved.urgencyOrder || [];
     state.importanceOrder = saved.importanceOrder || [];
@@ -2382,6 +2395,7 @@ function hideOverscrollIndicator() {
 }
 
 function goToNextPhase() {
+  if (window.SHARED_VIEW_ACTIVE) return;
   const currentPhase = state.phase;
   // Gate: check if current phase is ready to advance
   if (currentPhase === 'dump' && state.tasks.length === 0) return;
@@ -2397,6 +2411,7 @@ function goToNextPhase() {
 }
 
 function goToPrevPhase() {
+  if (window.SHARED_VIEW_ACTIVE) return;
   const currentPhase = state.phase;
   if (currentPhase === 'dump') return; // first phase
 
@@ -2933,13 +2948,158 @@ function returnToNow() {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
+// Sharing — publish this board as a link / render someone else's shared map.
+// The generic plumbing (Supabase calls, dialog, banner) lives in share.js;
+// this section is the app-specific glue.
+// ──────────────────────────────────────────────────────────────────────────────
+
+const SHARE_MAP_KIND = 'urgency-importance';
+
+function serializeBoardForShare() {
+  const canvas = document.getElementById('scatter-canvas');
+  const rect = canvas ? canvas.getBoundingClientRect() : { width: 0, height: 0 };
+  // Prefer live card positions (mid-drag DOM state) over saved ones,
+  // mirroring how doCleanup snapshots the canvas.
+  const positions = {};
+  state.tasks.forEach(t => {
+    const card = canvas && canvas.querySelector(`.canvas-card[data-id="${t.id}"]`);
+    if (card && card.style.left) {
+      positions[t.id] = { x: parseFloat(card.style.left) || 0, y: parseFloat(card.style.top) || 0 };
+    } else if (state.cardPositions[t.id]) {
+      positions[t.id] = state.cardPositions[t.id];
+    }
+  });
+  return {
+    version: 1,
+    tasks: state.tasks.map(t => Object.assign({}, t)),
+    cardPositions: positions,
+    done: [...state.done],
+    canvas: { w: Math.round(rect.width), h: Math.round(rect.height) },
+  };
+}
+
+// Published positions are absolute px on the owner's canvas; scale them to
+// this device's canvas so the map keeps its shape on any screen.
+function scaleSharedPositions(positions, sourceCanvas, targetW, targetH) {
+  const scaled = {};
+  const sw = sourceCanvas && sourceCanvas.w > 0 ? sourceCanvas.w : targetW;
+  const sh = sourceCanvas && sourceCanvas.h > 0 ? sourceCanvas.h : targetH;
+  const EDGE = 12, CARD_W = 140, CARD_H = 40;
+  Object.keys(positions).forEach(id => {
+    const p = positions[id];
+    if (!p) return;
+    let x = (p.x / sw) * targetW;
+    let y = (p.y / sh) * targetH;
+    x = Math.min(Math.max(x, EDGE), Math.max(EDGE, targetW - CARD_W - EDGE));
+    y = Math.min(Math.max(y, EDGE), Math.max(EDGE, targetH - CARD_H - EDGE));
+    scaled[id] = { x, y };
+  });
+  return scaled;
+}
+
+function copySharedToBoard(data) {
+  try {
+    const existing = JSON.parse(localStorage.getItem(LS_KEY));
+    if (existing && existing.tasks && existing.tasks.length > 0) {
+      if (!confirm('You already have a board here. Replace it with a copy of this shared map?')) return;
+    }
+  } catch (e) { /* no readable existing board */ }
+
+  let maxId = 0;
+  (data.tasks || []).forEach(t => {
+    const m = /^t(\d+)$/.exec(t.id || '');
+    if (m) maxId = Math.max(maxId, parseInt(m[1], 10));
+  });
+  const payload = {
+    tasks: data.tasks || [],
+    urgencyOrder: [],
+    importanceOrder: [],
+    phase: 'scatter',
+    cardPositions: state.cardPositions, // already scaled to this device
+    done: data.done || [],
+    idCounter: maxId,
+    history: [],
+  };
+  try {
+    localStorage.setItem(LS_KEY, JSON.stringify(payload));
+  } catch (e) {
+    alert('Could not save the copy — browser storage is unavailable.');
+    return;
+  }
+  location.hash = '';
+  location.reload();
+}
+
+async function bootSharedView(mapId) {
+  window.SHARED_VIEW_ACTIVE = true;
+  document.body.classList.add('shared-view');
+  showPhase('scatter');
+
+  let record;
+  try {
+    record = await TodoMapShare.fetchMap(mapId);
+  } catch (err) {
+    TodoMapShare.renderShareError({
+      title: 'Couldn’t load this shared map',
+      message: err.message,
+    });
+    return;
+  }
+  if (!record) {
+    TodoMapShare.renderShareError({
+      title: 'This map is no longer shared',
+      message: 'The link may have been turned off by its owner.',
+    });
+    return;
+  }
+  if (record.map_kind !== SHARE_MAP_KIND) {
+    // An impact/effort link opened on the main page — hand it to that variant
+    location.replace('impact-effort/#m=' + mapId);
+    return;
+  }
+
+  const data = record.data || {};
+  state.tasks = Array.isArray(data.tasks) ? data.tasks : [];
+  state.done = new Set(data.done || []);
+  state.history = [];
+  state.viewingIdx = null;
+
+  document.fonts.ready.then(() => {
+    const canvas = document.getElementById('scatter-canvas');
+    const rect = canvas.getBoundingClientRect();
+    if (rect.width > 0) {
+      state.cardPositions = scaleSharedPositions(data.cardPositions || {}, data.canvas, rect.width, rect.height);
+      buildCanvasCards(prefersReducedMotion());
+      canvas.querySelectorAll('.canvas-card').forEach(c => { c.style.opacity = '1'; });
+      drawQuadrantLines(prefersReducedMotion());
+      announce('Viewing a shared map, read-only.');
+    }
+  });
+
+  TodoMapShare.renderSharedChrome({
+    record,
+    itemCount: state.tasks.length,
+    onCopyToBoard: () => copySharedToBoard(data),
+  });
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
 // Boot
 // ──────────────────────────────────────────────────────────────────────────────
 
 function init() {
+  // Shared-view mode: someone opened a share link — render it read-only
+  // and skip all owner-side setup (their own board stays untouched).
+  if (window.TodoMapShare && TodoMapShare.sharedMapId) {
+    bootSharedView(TodoMapShare.sharedMapId);
+    return;
+  }
   initSort();
   initToolbar();
   initExportImport();
+  if (window.TodoMapShare) {
+    TodoMapShare.initShareUI({ kind: SHARE_MAP_KIND, serialize: serializeBoardForShare });
+  }
   initExistingTasksLine();
   initCanvasAdd();
   initDump();
@@ -3007,6 +3167,7 @@ init();
 
 // Ensure typewriter starts on fresh load after everything is initialized
 document.fonts.ready.then(() => {
+  if (window.SHARED_VIEW_ACTIVE) return;
   if (state.tasks.length === 0 && state.phase === 'dump') {
     const wrap = document.querySelector('.dump-input-wrap');
     if (wrap) wrap.classList.remove('has-value');

@@ -1,0 +1,30 @@
+# Keeps the Supabase free-tier project awake. Free projects pause after
+# ~1 week without API traffic, which would break every shared map link.
+# This pings twice a week (Mon + Thu) so a single missed run never crosses
+# the pause threshold. The anon key is public by design (it also ships in
+# share-config.js), so it's fine to have here.
+name: Supabase keep-alive ping
+
+on:
+  schedule:
+    - cron: '17 6 * * 1,4' # Mon + Thu at 06:17 UTC
+  workflow_dispatch: {}    # allows manual runs from the Actions tab
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping get_shared_map
+        run: |
+          ANON_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlkbWx4dWl4bXZxdXplcnF6eHVvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM1Mjg0MTQsImV4cCI6MjA5OTEwNDQxNH0.7FJBymKf1Zzby7pCOxQUpQF6pIMBeeq6ruLAHNxlNzQ"
+          RESPONSE=$(curl -s -w '\n%{http_code}' -X POST \
+            "https://ydmlxuixmvquzerqzxuo.supabase.co/rest/v1/rpc/get_shared_map" \
+            -H "apikey: $ANON_KEY" \
+            -H "Authorization: Bearer $ANON_KEY" \
+            -H "Content-Type: application/json" \
+            -d '{"map_id":"keep-alive-ping"}')
+          STATUS=$(echo "$RESPONSE" | tail -1)
+          echo "HTTP $STATUS"
+          # 200 with a null body is the expected answer — the query ran,
+          # which is all the activity Supabase needs to see.
+          [ "$STATUS" = "200" ]
