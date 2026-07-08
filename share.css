@@ -3,18 +3,10 @@
    Uses the page's own custom properties (--sage, --font-body, …).
    ───────────────────────────────────────────────────────────────────────── */
 
-/* ── Shared view: strip owner-only chrome, freeze the canvas ── */
-body.shared-view .canvas-toolbar,
-body.shared-view .canvas-util-wrap,
-body.shared-view .history-timeline,
-body.shared-view .interaction-hints {
-  display: none !important;
-}
-body.shared-view .canvas-card {
-  pointer-events: none;
-  cursor: default;
-}
-body.shared-view .canvas-card .canvas-handle {
+/* ── Sandbox view: the map is fully interactive; hide only what would
+      leave the map screen. (The share button is never injected here —
+      share.js skips it when a shared map is open.) ── */
+body.shared-view .toolbar-item:has(#btn-back-to-top) {
   display: none;
 }
 
@@ -206,6 +198,67 @@ body.shared-view .flow-container {
 .share-btn-quiet:focus-visible {
   outline: 2px solid var(--sage, #526347);
   outline-offset: 2px;
+}
+
+/* ── Update notice (owner published a newer version) ── */
+.share-update-notice {
+  position: fixed;
+  top: 52px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 498;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--card-bg, #fff);
+  border: 1px solid rgba(46, 52, 45, 0.12);
+  border-radius: 999px;
+  box-shadow: var(--card-shadow-lift, 0 8px 24px rgba(46, 52, 45, 0.16));
+  padding: 8px 8px 8px 16px;
+  font-family: var(--font-body, sans-serif);
+  font-size: 12.5px;
+  color: var(--text, #2e342d);
+  max-width: calc(100vw - 32px);
+}
+.share-update-notice button {
+  font-family: var(--font-display, sans-serif);
+  font-size: 12px;
+  border: none;
+  border-radius: 999px;
+  padding: 6px 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.share-update-notice .notice-load { background: var(--sage, #526347); color: #fff; font-weight: 600; }
+.share-update-notice .notice-dismiss { background: none; color: var(--text-dim, #666); }
+.share-update-notice .notice-dismiss:hover { color: var(--text, #2e342d); }
+
+/* ── Loading indicator while the shared map is fetched ── */
+.share-loading {
+  position: fixed;
+  inset: 0;
+  z-index: 450;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  font-family: var(--font-body, sans-serif);
+  font-size: 13px;
+  color: var(--text-dim, #666);
+  pointer-events: none;
+}
+.share-loading .spinner {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid rgba(82, 99, 71, 0.2);
+  border-top-color: var(--sage, #526347);
+  animation: share-spin 800ms linear infinite;
+}
+@keyframes share-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .share-loading .spinner { animation: none; }
 }
 
 /* ── Shared-map error overlay ── */

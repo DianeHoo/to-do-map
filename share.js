@@ -300,48 +300,101 @@
   // ── Viewer UI: banner, list panel, error overlay ────────────────────────────
 
   function renderSharedChrome(opts) {
-    // opts: { record: {data, map_kind, updated_at}, itemCount, onCopyToBoard }
+    // opts: {
+    //   record: {data, map_kind, updated_at},
+    //   getState: () => ({ tasks, done }),   // live sandbox state for the list
+    //   onCopyToBoard, onReset,
+    // }
     const banner = el('div', 'share-banner');
     banner.setAttribute('role', 'region');
     banner.setAttribute('aria-label', 'Shared map');
 
-    banner.appendChild(el('span', 'share-banner-title', 'Shared to-do map'));
-    const count = opts.itemCount;
-    const metaBits = [`${count} item${count === 1 ? '' : 's'}`];
-    if (opts.record.updated_at) metaBits.push(`updated ${timeAgo(opts.record.updated_at)}`);
+    banner.appendChild(el('span', 'share-banner-title', 'Shared map — your copy'));
+    const live = opts.getState();
+    const count = live.tasks.length;
+    const metaBits = [`${count} item${count === 1 ? '' : 's'}`, 'edits save on this device only'];
     banner.appendChild(el('span', 'share-banner-meta', metaBits.join(' · ')));
     banner.appendChild(el('span', 'share-banner-spacer'));
 
     const listBtn = el('button', null, 'View list');
+    const resetBtn = el('button', null, 'Reset to owner’s version');
     const copyBtn = el('button', null, 'Copy to my board');
     const ownLink = el('a', null, 'Make your own →');
     ownLink.href = location.pathname;
 
     banner.appendChild(listBtn);
+    banner.appendChild(resetBtn);
     banner.appendChild(copyBtn);
     banner.appendChild(ownLink);
 
-    // List panel
+    // List panel — rebuilt from live state every time it opens, so it
+    // reflects the viewer's own edits and tick-offs.
     const panel = el('div', 'share-list-panel');
     panel.hidden = true;
     panel.setAttribute('aria-label', 'Shared list items');
-    const data = opts.record.data || {};
-    const doneSet = new Set(data.done || []);
-    (data.tasks || []).forEach(task => {
-      const item = el('div', 'share-list-item' + (doneSet.has(task.id) ? ' done' : ''));
-      item.appendChild(el('span', 'dot'));
-      item.appendChild(el('span', 'item-text', task.text));
-      panel.appendChild(item);
-    });
+
+    function rebuildPanel() {
+      panel.textContent = '';
+      const s = opts.getState();
+      const doneSet = s.done instanceof Set ? s.done : new Set(s.done || []);
+      (s.tasks || []).forEach(task => {
+        const item = el('div', 'share-list-item' + (doneSet.has(task.id) ? ' done' : ''));
+        item.appendChild(el('span', 'dot'));
+        item.appendChild(el('span', 'item-text', task.text));
+        panel.appendChild(item);
+      });
+      if (!s.tasks || s.tasks.length === 0) {
+        panel.appendChild(el('div', 'share-list-item', 'No items.'));
+      }
+    }
 
     listBtn.addEventListener('click', () => {
       panel.hidden = !panel.hidden;
+      if (!panel.hidden) rebuildPanel();
       listBtn.textContent = panel.hidden ? 'View list' : 'Hide list';
     });
     copyBtn.addEventListener('click', () => opts.onCopyToBoard && opts.onCopyToBoard());
+    resetBtn.addEventListener('click', () => {
+      if (confirm('Discard your changes and reload the owner’s version of this map?')) {
+        opts.onReset && opts.onReset();
+      }
+    });
 
     document.body.appendChild(banner);
     document.body.appendChild(panel);
+  }
+
+  // "The owner updated this map" pill, shown when the published version is
+  // newer than the one this sandbox copy was made from.
+  function showUpdateNotice(opts) {
+    // opts: { updatedAt, onLoadNewest }
+    const notice = el('div', 'share-update-notice');
+    notice.setAttribute('role', 'status');
+    const when = opts.updatedAt ? ` ${timeAgo(opts.updatedAt)}` : '';
+    notice.appendChild(el('span', null, `The owner updated this map${when}.`));
+    const loadBtn = el('button', 'notice-load', 'Load newest');
+    const dismissBtn = el('button', 'notice-dismiss', 'Keep my version');
+    loadBtn.addEventListener('click', () => {
+      if (confirm('Load the owner’s newest version? This replaces your changes to this copy.')) {
+        opts.onLoadNewest && opts.onLoadNewest();
+      }
+    });
+    dismissBtn.addEventListener('click', () => notice.remove());
+    notice.appendChild(loadBtn);
+    notice.appendChild(dismissBtn);
+    document.body.appendChild(notice);
+  }
+
+  let loadingEl = null;
+  function showLoading() {
+    if (loadingEl) return;
+    loadingEl = el('div', 'share-loading');
+    loadingEl.appendChild(el('div', 'spinner'));
+    loadingEl.appendChild(el('div', null, 'Loading shared map…'));
+    document.body.appendChild(loadingEl);
+  }
+  function hideLoading() {
+    if (loadingEl) { loadingEl.remove(); loadingEl = null; }
   }
 
   function renderShareError(opts) {
@@ -363,5 +416,8 @@
     initShareUI,
     renderSharedChrome,
     renderShareError,
+    showUpdateNotice,
+    showLoading,
+    hideLoading,
   };
 })();
