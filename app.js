@@ -19,6 +19,7 @@ let state = {
   importanceOrder: [],
   phase: 'dump',     // 'dump' | 'sort-urgency' | 'sort-importance' | 'scatter'
   cardPositions: {},
+  scatterSig: null,  // rankingSignature() the current cardPositions were computed from
   done: new Set(),
   history: [],       // cleanup snapshots: [{ ts, checkedCount, items: [{id,text,x,y,done}] }]
   viewingIdx: null,  // null = live view, number = index into state.history
@@ -360,22 +361,27 @@ function updateSortButton() {
   }
 }
 
+// Merge an existing ranking with the current task list: surviving tasks keep
+// their ranked positions, deleted tasks drop out, and tasks that were never
+// ranked surface at the top of the list so the user can slot them in.
+function reconcileOrder(order) {
+  const taskIds = new Set(state.tasks.map(t => t.id));
+  const kept = order.filter(id => taskIds.has(id));
+  const keptSet = new Set(kept);
+  const unranked = state.tasks.filter(t => !keptSet.has(t.id)).map(t => t.id);
+  return [...unranked, ...kept];
+}
+
 function transitionToSortUrgency() {
   oldTaskIds.clear();
   hiddenTaskIds.clear();
   document.getElementById('existing-tasks-line').style.display = 'none';
-  // Preserve existing order if it has all task IDs (e.g. from sample tasks)
-  const taskIds = new Set(state.tasks.map(t => t.id));
-  const urgencyValid = state.urgencyOrder.length === state.tasks.length &&
-    state.urgencyOrder.every(id => taskIds.has(id));
-  if (!urgencyValid) {
-    state.urgencyOrder = state.tasks.map(t => t.id);
-  }
-  const importanceValid = state.importanceOrder.length === state.tasks.length &&
-    state.importanceOrder.every(id => taskIds.has(id));
-  if (!importanceValid) {
-    state.importanceOrder = [...state.urgencyOrder];
-  }
+  // Keep whatever ranking already exists — adding or deleting a task in the
+  // dump must not throw away the rest of the ranking.
+  state.urgencyOrder = reconcileOrder(state.urgencyOrder);
+  state.importanceOrder = state.importanceOrder.length
+    ? reconcileOrder(state.importanceOrder)
+    : [...state.urgencyOrder];
   renderSortList('urgency');
   showPhase('sort-urgency');
   saveState();
@@ -843,13 +849,11 @@ function initSort() {
 }
 
 function onUrgencyDone() {
-  // Preserve existing importance order if it has all task IDs (e.g. from sample tasks)
-  const taskIds = new Set(state.tasks.map(t => t.id));
-  const importanceValid = state.importanceOrder.length === state.tasks.length &&
-    state.importanceOrder.every(id => taskIds.has(id));
-  if (!importanceValid) {
-    state.importanceOrder = [...state.urgencyOrder]; // carry over as starting order
-  }
+  // Keep the existing importance ranking, merging in any task changes; only a
+  // never-ranked board seeds from the urgency order.
+  state.importanceOrder = state.importanceOrder.length
+    ? reconcileOrder(state.importanceOrder)
+    : [...state.urgencyOrder]; // carry over as starting order
   renderSortList('importance');
   showPhase('sort-importance');
   saveState();
@@ -863,6 +867,10 @@ function onImportanceDone() {
 // ──────────────────────────────────────────────────────────────────────────────
 // Phase 3: SCATTER — Position computation
 // ──────────────────────────────────────────────────────────────────────────────
+
+function rankingSignature() {
+  return state.urgencyOrder.join('|') + '~' + state.importanceOrder.join('|');
+}
 
 function computeCanvasPositions(canvasW, canvasH) {
   const n = state.tasks.length;
@@ -958,7 +966,15 @@ function triggerScatter() {
     const canvasH = canvasRect.height;
     const canvasW = canvasRect.width;
 
-    state.cardPositions = computeCanvasPositions(canvasW, canvasH);
+    // Re-entering the map with unchanged rankings must not reshuffle the
+    // user's arrangement — only (re)compute when the rankings changed or a
+    // task has no position yet.
+    const sig = rankingSignature();
+    const missingPos = state.tasks.some(t => !state.cardPositions[t.id]);
+    if (missingPos || sig !== state.scatterSig) {
+      state.cardPositions = computeCanvasPositions(canvasW, canvasH);
+      state.scatterSig = sig;
+    }
     buildCanvasCards(rm);
 
     saveState();
@@ -1415,6 +1431,9 @@ function addTaskToCanvas(text) {
 
   state.urgencyOrder.push(task.id);
   state.importanceOrder.push(task.id);
+  // The new card was placed directly on the canvas — its position is in sync
+  // with the orders, so re-entering the map must not trigger a re-scatter.
+  state.scatterSig = rankingSignature();
 
   const card = document.createElement('div');
   card.className = 'canvas-card';
@@ -1770,6 +1789,7 @@ function saveState() {
       importanceOrder: state.importanceOrder,
       phase: state.phase,
       cardPositions: state.cardPositions,
+      scatterSig: state.scatterSig,
       done: [...state.done],
       idCounter: idCounter,
       history: state.history,
@@ -1793,6 +1813,12 @@ function loadSavedState() {
     state.importanceOrder = saved.importanceOrder || [];
     state.phase = saved.phase;
     state.cardPositions = saved.cardPositions || {};
+    // Boards saved before scatterSig existed: adopt the loaded rankings as the
+    // signature when every task already has a position, so the first re-entry
+    // to the map doesn't reshuffle it.
+    state.scatterSig = saved.scatterSig ||
+      (state.tasks.length && state.tasks.every(t => state.cardPositions[t.id])
+        ? rankingSignature() : null);
     state.done = new Set(saved.done || []);
     idCounter = saved.idCounter || 0;
     state.history = saved.history || [];
@@ -1855,6 +1881,7 @@ function doCleanup() {
     const canvasRect = canvas.getBoundingClientRect();
     if (canvasRect.width > 0 && state.tasks.length > 0) {
       state.cardPositions = computeCanvasPositions(canvasRect.width, canvasRect.height);
+      state.scatterSig = rankingSignature();
 
       // Animate remaining cards to new positions
       const remaining = canvas.querySelectorAll('.canvas-card');
@@ -1959,6 +1986,11 @@ function importGrid(file) {
       // Sandboxes only ever live on the map screen — never restore an
       // imported file into the (uninitialized) dump/sort screens there.
       if (window.SHARED_VIEW_ACTIVE) state.phase = 'scatter';
+      // Imported files predate scatterSig — adopt the imported rankings as the
+      // signature when every task has a position, so the map isn't reshuffled.
+      state.scatterSig =
+        (state.tasks.length && state.tasks.every(t => state.cardPositions[t.id]))
+          ? rankingSignature() : null;
       saveState();
 
       // Re-render from the restored phase
@@ -1974,6 +2006,7 @@ function importGrid(file) {
           if (rect.width > 0) {
             if (Object.keys(state.cardPositions).length === 0) {
               state.cardPositions = computeCanvasPositions(rect.width, rect.height);
+              state.scatterSig = rankingSignature();
             }
             buildCanvasCards(prefersReducedMotion());
             canvas.querySelectorAll('.canvas-card').forEach(c => { c.style.opacity = '1'; });
@@ -2299,6 +2332,20 @@ let isTransitioning = false;
 const OVERSCROLL_THRESHOLD = 120;
 const MAX_VISUAL_PULL = 250;
 
+// After a committed phase jump, swallow the remainder of the wheel gesture:
+// trackpad inertia keeps delivering events for a second or more after the
+// 450ms transition lock, and without this a single fling blows through
+// several phases (e.g. from the map all the way back to the dump screen).
+let absorbInertia = false;
+let inertiaQuietTimer = null;
+
+function beginInertiaAbsorb() {
+  absorbInertia = true;
+  clearTimeout(inertiaQuietTimer);
+  // The gate reopens only after the wheel events go quiet for a beat.
+  inertiaQuietTimer = setTimeout(() => { absorbInertia = false; }, 300);
+}
+
 function updateOverscrollVisual(activePhase, direction, noIndicator) {
   // Rubber band: 1:1 movement up to ~60% of max, then decelerating
   const raw = overscrollAccumulator;
@@ -2404,6 +2451,7 @@ function goToNextPhase() {
   if (currentPhase === 'scatter') return; // last phase
 
   isTransitioning = true;
+  beginInertiaAbsorb();
 
   if (currentPhase === 'dump') transitionToSortUrgency();
   else if (currentPhase === 'sort-urgency') onUrgencyDone();
@@ -2412,25 +2460,44 @@ function goToNextPhase() {
   setTimeout(() => { isTransitioning = false; }, 450);
 }
 
+// A board can reach the map without complete rankings (e.g. a shared map
+// copied to this browser stores empty order lists). Backfill them so the sort
+// screens have something to show, without treating the backfill as a ranking
+// change that would re-scatter the map.
+function ensureOrdersRenderable() {
+  if (state.urgencyOrder.length === state.tasks.length &&
+      state.importanceOrder.length === state.tasks.length) return;
+  const positionsInSync = state.scatterSig === rankingSignature();
+  state.urgencyOrder = reconcileOrder(state.urgencyOrder);
+  state.importanceOrder = state.importanceOrder.length
+    ? reconcileOrder(state.importanceOrder)
+    : [...state.urgencyOrder];
+  if (positionsInSync) state.scatterSig = rankingSignature();
+}
+
 function goToPrevPhase() {
   if (window.SHARED_VIEW_ACTIVE) return;
   const currentPhase = state.phase;
   if (currentPhase === 'dump') return; // first phase
 
   isTransitioning = true;
+  beginInertiaAbsorb();
 
   if (currentPhase === 'sort-urgency') {
     showDumpFresh();
     document.getElementById('phase-dump').classList.toggle('has-tasks', state.tasks.length > 0);
     showPhase('dump');
   } else if (currentPhase === 'sort-importance') {
+    ensureOrdersRenderable();
     renderSortList('urgency');
     showPhase('sort-urgency');
   } else if (currentPhase === 'scatter') {
+    ensureOrdersRenderable();
     renderSortList('importance');
     showPhase('sort-importance');
   }
 
+  saveState();
   setTimeout(() => { isTransitioning = false; }, 450);
 }
 
@@ -2443,6 +2510,13 @@ function initPageScroll() {
   // bouncingBack is declared globally alongside resetOverscroll
 
   container.addEventListener('wheel', (e) => {
+    if (absorbInertia) {
+      // Still inside the gesture (or its inertia) that triggered the last
+      // phase jump — keep extending the quiet window until events stop.
+      beginInertiaAbsorb();
+      e.preventDefault();
+      return;
+    }
     if (isTransitioning) { e.preventDefault(); return; }
     if (bouncingBack) { e.preventDefault(); return; }
     if (dragState || canvasDragActive) { return; }
@@ -3199,6 +3273,7 @@ function init() {
         if (canvasRect.width > 0) {
           if (Object.keys(state.cardPositions).length === 0) {
             state.cardPositions = computeCanvasPositions(canvasRect.width, canvasRect.height);
+            state.scatterSig = rankingSignature();
           }
           buildCanvasCards(prefersReducedMotion());
           canvas.querySelectorAll('.canvas-card').forEach(c => { c.style.opacity = '1'; });
