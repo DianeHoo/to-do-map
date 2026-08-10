@@ -1781,6 +1781,19 @@ let activeLsKey = LS_KEY;
 // For sandbox copies: which published version this copy was seeded from.
 let sandboxMeta = null;
 
+// Multi-map: the home screen opens maps as ?map=<id>, each with its own slot
+// in the maps index (maps-index.js). Without the param this stays the legacy
+// single-board key.
+const MAP_URL_ID = (() => {
+  try { return new URLSearchParams(location.search).get('map'); }
+  catch (e) { return null; }
+})();
+if (MAP_URL_ID) activeLsKey = 'todomap-map-' + MAP_URL_ID;
+
+// Last known scatter-canvas size, persisted alongside positions so the home
+// screen can normalize task coordinates for its card thumbnails.
+let lastCanvasDims = null;
+
 function saveState() {
   try {
     const serializable = {
@@ -1795,7 +1808,17 @@ function saveState() {
       history: state.history,
     };
     if (sandboxMeta) serializable.sandboxMeta = sandboxMeta;
+    const canvasEl = document.getElementById('scatter-canvas');
+    const rect = canvasEl ? canvasEl.getBoundingClientRect() : null;
+    if (rect && rect.width > 0) {
+      lastCanvasDims = { w: Math.round(rect.width), h: Math.round(rect.height) };
+    }
+    if (lastCanvasDims) serializable.canvas = lastCanvasDims;
     localStorage.setItem(activeLsKey, JSON.stringify(serializable));
+    if (MAP_URL_ID && window.TodoMapsIndex) {
+      TodoMapsIndex.touch(MAP_URL_ID);
+      if (window.TodoMapsCloud && TodoMapsCloud.enabled) TodoMapsCloud.schedulePush(MAP_URL_ID);
+    }
   } catch(e) { /* storage full or unavailable — silent fail */ }
 }
 
@@ -1824,6 +1847,7 @@ function loadSavedState() {
     state.history = saved.history || [];
     state.viewingIdx = null;
     sandboxMeta = saved.sandboxMeta || null;
+    lastCanvasDims = saved.canvas || null;
     return saved.phase;
   } catch(e) { return false; }
 }
@@ -3073,15 +3097,9 @@ function scaleSharedPositions(positions, sourceCanvas, targetW, targetH) {
   return scaled;
 }
 
-// Promote the current sandbox copy (with the viewer's edits) to their own board.
+// Promote the current sandbox copy (with the viewer's edits) to a map of
+// their own in the maps index, and open it there.
 function copySandboxToBoard() {
-  try {
-    const existing = JSON.parse(localStorage.getItem(LS_KEY));
-    if (existing && existing.tasks && existing.tasks.length > 0) {
-      if (!confirm('You already have a board here. Replace it with your copy of this shared map?')) return;
-    }
-  } catch (e) { /* no readable existing board */ }
-
   const payload = {
     tasks: state.tasks,
     urgencyOrder: [],
@@ -3092,14 +3110,15 @@ function copySandboxToBoard() {
     idCounter: idCounter,
     history: state.history,
   };
-  try {
-    localStorage.setItem(LS_KEY, JSON.stringify(payload));
-  } catch (e) {
+  if (lastCanvasDims) payload.canvas = lastCanvasDims;
+  const newId = window.TodoMapsIndex
+    ? TodoMapsIndex.create({ kind: SHARE_MAP_KIND, name: 'copied map', data: payload })
+    : null;
+  if (newId === null) {
     alert('Could not save the copy — browser storage is unavailable.');
     return;
   }
-  location.hash = '';
-  location.reload();
+  location.href = location.pathname + '?map=' + encodeURIComponent(newId);
 }
 
 // A share link opens as a sandbox: a fully editable copy of the published
@@ -3245,6 +3264,15 @@ function init() {
   if (window.TodoMapShare && TodoMapShare.sharedMapId) {
     bootSharedView(TodoMapShare.sharedMapId);
     return;
+  }
+  // An impact/effort map opened on the main page — hand it to that variant
+  // before anything touches its slot.
+  if (MAP_URL_ID && window.TodoMapsIndex) {
+    const entry = TodoMapsIndex.get(MAP_URL_ID);
+    if (entry && entry.kind !== 'urgency-importance') {
+      location.replace('impact-effort/?map=' + encodeURIComponent(MAP_URL_ID));
+      return;
+    }
   }
   initSort();
   initToolbar();

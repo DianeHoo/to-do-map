@@ -9,6 +9,16 @@
 <meta property="og:image" content="https://todomap.live/preview.png">
 <meta property="og:url" content="https://todomap.live">
 <meta property="og:type" content="website">
+<script>
+// The editor now opens one map from the home screen (?map=<id>) or a share
+// link (#m=<id>). A bare visit belongs on the home screen — bounce before
+// anything renders.
+(function () {
+  var hasMap = /(?:\?|&)map=/.test(location.search);
+  var hasShare = /^#m=/.test(location.hash);
+  if (!hasMap && !hasShare) location.replace('home/');
+})();
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500&display=swap" rel="stylesheet">
@@ -1729,6 +1739,8 @@ Start by adding what's on your mind.</p>
 
 <script src="share-config.js"></script>
 <script src="share.js"></script>
+<script src="maps-index.js"></script>
+<script src="maps-cloud.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

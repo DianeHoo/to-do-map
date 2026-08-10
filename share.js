@@ -413,6 +413,10 @@
     configured,
     sharedMapId,
     fetchMap: api.fetchMap,
+    // Raw RPCs for the home screen's per-map share flow (it keeps its own
+    // owner keys in the maps index, not in this module's owner store).
+    publish: api.publish,
+    update: api.update,
     initShareUI,
     renderSharedChrome,
     renderShareError,
