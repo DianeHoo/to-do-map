@@ -264,14 +264,36 @@
   }
 
   function deleteMap(entry) {
-    // The entry leaves the index right away; its data slot sticks around
-    // until the undo toast expires.
-    Maps.remove(entry.id, false);
+    // Everything leaves immediately — entry, data slot, server row — so a tab
+    // closed mid-toast can't resurrect the map later; undo restores from the
+    // in-memory capture. The share link outlives the undo window on purpose:
+    // its revoke is queued and drained only once the toast expires.
+    const data = Maps.readData(entry.id);
+    if (!Maps.remove(entry.id, true)) {
+      showToast('couldn’t delete — browser storage is unavailable.');
+      return;
+    }
+    if (cloud) cloud.pushDelete(entry.id);
+    const share = entry.share;
+    const revokes = window.TodoMapsCloud || null;
+    if (share && share.id && share.ownerKey && revokes) {
+      revokes.queueShareRevoke(share.id, share.ownerKey);
+    }
     render();
     showToast('deleted “' + entry.name + '”', {
       actionLabel: 'undo',
-      onAction: () => { Maps.restore(entry); cloudPush(entry.id); render(); },
-      onExpire: () => { Maps.dropSlot(entry.id); if (cloud) cloud.pushDelete(entry.id); },
+      onAction: () => {
+        Maps.restore(entry);
+        if (data && !Maps.writeData(entry.id, data)) {
+          showToast('map restored, but its tasks couldn’t be saved (storage full?)');
+        }
+        if (share && share.id && revokes) revokes.dequeueShareRevoke(share.id);
+        if (cloud) cloud.undeleteMap(entry.id);
+        render();
+      },
+      onExpire: () => {
+        if (share && share.id && revokes) revokes.drainShareRevokes();
+      },
     });
   }
 
@@ -312,6 +334,7 @@
         // Already shared once from here — refresh the same link if it's alive.
         const ok = await TodoMapShare.update(existing.id, existing.ownerKey, payload);
         if (ok) {
+          Maps.setShare(entry.id, { ...existing, updatedAt: new Date().toISOString() });
           await copyText(shareUrl(existing.id));
           showToast('share link updated and copied');
           return;
@@ -319,10 +342,12 @@
         // Link was deleted server-side — fall through and publish fresh.
       }
       const res = await TodoMapShare.publish(payload, entry.kind);
+      const now = new Date().toISOString();
       Maps.setShare(entry.id, {
         id: res.id,
         ownerKey: res.owner_key,
-        publishedAt: new Date().toISOString(),
+        publishedAt: now,
+        updatedAt: now,
       });
       await copyText(shareUrl(res.id));
       showToast('share link copied');
@@ -418,6 +443,37 @@
     authLink.textContent = user && user.email ? user.email : 'sign in';
   }
 
+  // Honest sync surface: hidden while things work, one short line when they
+  // don't. Driven by TodoMapsCloud's status tracker (no retry machinery).
+  const syncStatusEl = document.getElementById('sync-status');
+
+  function refreshSyncStatus() {
+    if (!cloud || !syncStatusEl) return;
+    const s = cloud.getStatus();
+    syncStatusEl.textContent = '';
+    if (s === 'offline') {
+      syncStatusEl.textContent = 'offline — changes stay in this browser';
+    } else if (s === 'error') {
+      syncStatusEl.append('sync failed · ');
+      const retry = document.createElement('button');
+      retry.type = 'button';
+      retry.textContent = 'retry';
+      retry.addEventListener('click', () => {
+        cloud.syncNow()
+          .then((changed) => { if (changed) render(); })
+          .catch(() => { /* the status line already reports it */ });
+      });
+      syncStatusEl.appendChild(retry);
+    } else if (s === 'signed-out') {
+      const link = document.createElement('button');
+      link.type = 'button';
+      link.textContent = 'signed out — sign in to sync';
+      link.addEventListener('click', openAuthModal);
+      syncStatusEl.appendChild(link);
+    }
+    syncStatusEl.hidden = !syncStatusEl.firstChild;
+  }
+
   function openAuthModal() {
     const user = cloud.currentUser();
     const signedIn = !!(user && user.email);
@@ -495,9 +551,11 @@
   // ── Boot ────────────────────────────────────────────────────────────────────
 
   Maps.migrateLegacy();
+  // Fold pre-multi-map share links (kind-keyed store) into their map entries.
+  if (window.TodoMapShare && TodoMapShare.adoptLegacyShares) TodoMapShare.adoptLegacyShares();
 
   // A magic link may have just landed us here with tokens in the hash;
-  // consume them before first render (signing in can re-id local maps).
+  // consume them before first render.
   if (cloud) {
     const auth = cloud.consumeAuthHash();
     if (auth && auth.error) showToast('sign-in failed: ' + auth.error);
@@ -506,8 +564,10 @@
 
   render();
   refreshAuthLink();
+  refreshSyncStatus();
 
   if (cloud) {
+    cloud.onStatus(refreshSyncStatus);
     cloud.syncNow()
       .then((changed) => { if (changed) render(); })
       .catch((e) => console.warn('[todomap sync]', e.message));

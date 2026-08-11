@@ -126,9 +126,12 @@
 
   // Remove a map from the index. The data slot is kept unless dropData is
   // true, so the home screen's undo toast can restore without a copy.
+  // Returns false when the index write failed (storage unavailable) — the
+  // slot is kept in that case too, so a half-failed delete never orphans data.
   function remove(id, dropData) {
-    writeIndex(readIndex().filter(e => e.id !== id));
-    if (dropData) dropSlot(id);
+    const ok = writeIndex(readIndex().filter(e => e.id !== id));
+    if (ok && dropData) dropSlot(id);
+    return ok;
   }
 
   function dropSlot(id) {
@@ -143,30 +146,65 @@
     writeIndex(entries);
   }
 
-  // Give every map a fresh id (moving its data slot along). Cloud sync calls
-  // this when the signed-in account changes: server rows keep their old ids
-  // under the old owner, so re-inserting under new ids is what lets the same
-  // maps belong to the new account.
-  function reassignIds() {
+  // Give one map a fresh id, moving its data slot along. Cloud sync calls
+  // this only when a push proves the old id's server row belongs to another
+  // account (a previous anonymous session) — everything else keeps its id so
+  // bookmarks and open editors survive sign-in. Returns the new id, or null
+  // when the move couldn't be completed safely.
+  function reassignId(id) {
     const entries = readIndex();
-    entries.forEach(e => {
-      const fresh = newId();
-      const data = readData(e.id);
-      if (data && writeData(fresh, data)) dropSlot(e.id);
-      e.id = fresh;
-    });
-    writeIndex(entries);
+    const entry = entries.find(e => e.id === id);
+    if (!entry) return null;
+    const fresh = newId();
+    const data = readData(id);
+    if (data) {
+      // Copy first; only drop the old slot once the copy is known-good, so a
+      // failed write (quota) never orphans the map's contents.
+      if (!writeData(fresh, data)) return null;
+    }
+    entry.id = fresh;
+    if (!writeIndex(entries)) {
+      dropSlot(fresh);
+      return null;
+    }
+    if (data) dropSlot(id);
+    recordMove(id, fresh);
+    return fresh;
+  }
+
+  // Forwarding notes for reassignId: an editor tab open on the old id reads
+  // this (via its storage listener) and follows the map to its new URL
+  // instead of stranding the user on a slot that no longer exists.
+  const MOVED_KEY = 'todomapMovedIds.v1';
+
+  function recordMove(oldId, newId) {
+    try {
+      const moved = JSON.parse(localStorage.getItem(MOVED_KEY)) || {};
+      moved[oldId] = newId;
+      // A handful of recent moves is plenty — this only serves live tabs.
+      const keys = Object.keys(moved);
+      if (keys.length > 20) keys.slice(0, keys.length - 20).forEach(k => { delete moved[k]; });
+      localStorage.setItem(MOVED_KEY, JSON.stringify(moved));
+    } catch (e) { /* storage unavailable */ }
+  }
+
+  function movedTo(id) {
+    try {
+      const moved = JSON.parse(localStorage.getItem(MOVED_KEY)) || {};
+      return moved[id] || null;
+    } catch (e) { return null; }
   }
 
   // Insert or replace an entry exactly as given (timestamps untouched), used
   // by cloud sync when the server side is the newer one. Optionally writes
-  // the map's data slot in the same step.
+  // the map's data slot in the same step. Returns false when storage refused
+  // either write, so sync can retry instead of assuming the copy landed.
   function adopt(entry, data) {
-    if (!entry || !entry.id) return;
-    if (data !== undefined && !writeData(entry.id, data)) return;
+    if (!entry || !entry.id) return false;
+    if (data !== undefined && !writeData(entry.id, data)) return false;
     const entries = readIndex().filter(e => e.id !== entry.id);
     entries.push(entry);
-    writeIndex(entries);
+    return writeIndex(entries);
   }
 
   // Remember a map's published share so re-sharing updates the same link.
@@ -214,7 +252,8 @@
     dropSlot,
     restore,
     adopt,
-    reassignIds,
+    reassignId,
+    movedTo,
     setShare,
     readData,
     writeData,

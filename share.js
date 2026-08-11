@@ -6,8 +6,10 @@
 // main map and the impact/effort variant BEFORE app.js; each app.js wires it
 // up through TodoMapShare.initShareUI() and the shared-view boot path.
 //
-// localStorage 'todomap-shares' holds the owner keys for maps published from
-// this browser: { [mapId]: { key, kind, publishedAt, updatedAt } }
+// Share records ({ id, ownerKey, publishedAt, updatedAt }) live on each map's
+// entry in the maps index — the dialog reaches them through accessors the
+// caller passes to initShareUI. The old kind-keyed 'todomap-shares' store is
+// folded into the index once by adoptLegacyShares().
 // ─────────────────────────────────────────────────────────────────────────────
 
 (function () {
@@ -55,36 +57,51 @@
     remove: (id, key) => rpc('delete_shared_map', { map_id: id, owner_key: key }),
   };
 
-  // ── Owner-key store ─────────────────────────────────────────────────────────
+  // ── Legacy owner-key store migration ────────────────────────────────────────
 
   function readOwnerStore() {
     try { return JSON.parse(localStorage.getItem(OWNER_STORE_KEY)) || {}; }
     catch (e) { return {}; }
   }
-  function writeOwnerStore(store) {
-    try { localStorage.setItem(OWNER_STORE_KEY, JSON.stringify(store)); }
-    catch (e) { /* storage unavailable */ }
-  }
-  function getShareFor(kind) {
+
+  // Pre-multi-map browsers kept published links here, keyed by map kind — so
+  // two maps of the same kind would fight over one record. The maps index owns
+  // share records now (entry.share); fold unambiguous store records into it,
+  // then retire the store. Called once from the home screen's boot.
+  function adoptLegacyShares() {
+    if (!window.TodoMapsIndex) return;
     const store = readOwnerStore();
-    let best = null;
-    Object.keys(store).forEach(id => {
-      const rec = store[id];
-      if (rec && rec.kind === kind && (!best || rec.publishedAt > best.publishedAt)) {
-        best = Object.assign({ id }, rec);
-      }
-    });
-    return best;
-  }
-  function saveShare(id, rec) {
-    const store = readOwnerStore();
-    store[id] = rec;
-    writeOwnerStore(store);
-  }
-  function removeShare(id) {
-    const store = readOwnerStore();
-    delete store[id];
-    writeOwnerStore(store);
+    const recIds = Object.keys(store);
+    if (recIds.length) {
+      const newestByKind = {};
+      recIds.forEach(id => {
+        const rec = store[id];
+        if (!rec || !rec.kind) return;
+        const cur = newestByKind[rec.kind];
+        if (!cur || (rec.publishedAt || '') > (store[cur].publishedAt || '')) {
+          newestByKind[rec.kind] = id;
+        }
+      });
+      const mapsByKind = {};
+      TodoMapsIndex.list().forEach(e => {
+        (mapsByKind[e.kind] = mapsByKind[e.kind] || []).push(e);
+      });
+      Object.keys(newestByKind).forEach(kind => {
+        const candidates = mapsByKind[kind] || [];
+        // Adopt only when there is exactly one possible owner — never guess
+        // whose link it is. Unadopted links stay alive as they are.
+        if (candidates.length !== 1 || candidates[0].share) return;
+        const id = newestByKind[kind];
+        const rec = store[id];
+        TodoMapsIndex.setShare(candidates[0].id, {
+          id,
+          ownerKey: rec.key,
+          publishedAt: rec.publishedAt,
+          updatedAt: rec.updatedAt,
+        });
+      });
+    }
+    try { localStorage.removeItem(OWNER_STORE_KEY); } catch (e) { /* storage unavailable */ }
   }
 
   // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -132,7 +149,10 @@
   // ── Owner UI: share button + dialog ─────────────────────────────────────────
 
   function initShareUI(opts) {
-    // opts: { kind, serialize } — serialize() returns the publishable JSON
+    // opts: { kind, serialize, getShare, setShare, clearShare }
+    //   serialize()   → the publishable JSON
+    //   getShare()    → this map's { id, ownerKey, publishedAt, updatedAt } or null
+    //   setShare(rec) / clearShare() → persist or drop that record
     const wrap = document.getElementById('canvas-util-wrap');
     if (!wrap || sharedMapId) return; // no owner UI inside a shared view
 
@@ -148,7 +168,7 @@
   }
 
   function openShareDialog(opts) {
-    const existing = getShareFor(opts.kind);
+    const existing = opts.getShare();
     const data = opts.serialize();
 
     const backdrop = el('div', 'share-dialog-backdrop');
@@ -200,20 +220,20 @@
       const actions = el('div', 'share-dialog-actions');
       const updateBtn = el('button', 'share-btn-quiet', 'Update shared link');
       updateBtn.addEventListener('click', async () => {
-        const rec = readOwnerStore()[id];
-        if (!rec) return;
+        const rec = opts.getShare();
+        if (!rec || rec.id !== id) return;
         const fresh = opts.serialize();
         updateBtn.disabled = true;
         setStatus('Updating…');
         try {
-          const ok = await api.update(id, rec.key, fresh);
+          const ok = await api.update(id, rec.ownerKey, fresh);
           if (ok) {
             rec.updatedAt = new Date().toISOString();
-            saveShare(id, rec);
+            opts.setShare(rec);
             setStatus('Updated — everyone with the link now sees this version.');
           } else {
             setStatus('This link no longer exists on the server. Publish a new one.', true);
-            removeShare(id);
+            opts.clearShare();
           }
         } catch (err) {
           setStatus(err.message, true);
@@ -223,13 +243,13 @@
 
       const stopBtn = el('button', 'share-btn-quiet share-btn-danger', 'Stop sharing');
       stopBtn.addEventListener('click', async () => {
-        const rec = readOwnerStore()[id];
-        if (!rec) return;
+        const rec = opts.getShare();
+        if (!rec || rec.id !== id) return;
         stopBtn.disabled = true;
         setStatus('Removing…');
         try {
-          await api.remove(id, rec.key);
-          removeShare(id);
+          await api.remove(id, rec.ownerKey);
+          opts.clearShare();
           setStatus('');
           renderUnpublishedState();
         } catch (err) {
@@ -277,7 +297,7 @@
           const fresh = opts.serialize();
           const result = await api.publish(fresh, opts.kind);
           const now = new Date().toISOString();
-          saveShare(result.id, { key: result.owner_key, kind: opts.kind, publishedAt: now, updatedAt: now });
+          opts.setShare({ id: result.id, ownerKey: result.owner_key, publishedAt: now, updatedAt: now });
           renderPublishedState(result.id);
           const input = dialog.querySelector('input');
           copyToClipboard(shareUrlFor(result.id), input).then(ok => {
@@ -413,10 +433,12 @@
     configured,
     sharedMapId,
     fetchMap: api.fetchMap,
-    // Raw RPCs for the home screen's per-map share flow (it keeps its own
-    // owner keys in the maps index, not in this module's owner store).
+    // Raw RPCs for flows that manage their own records in the maps index —
+    // the home screen's share action and its delete pipeline's revokes.
     publish: api.publish,
     update: api.update,
+    remove: api.remove,
+    adoptLegacyShares,
     initShareUI,
     renderSharedChrome,
     renderShareError,

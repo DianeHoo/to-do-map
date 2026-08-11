@@ -44,6 +44,34 @@ function announce(msg) {
   requestAnimationFrame(() => { el.textContent = msg; });
 }
 
+// Bottom-center notice pill (storage failures, cleanup undo, import errors) —
+// the editors' quieter cousin of the home screen's toast.
+let editorToastTimer = null;
+function showEditorNotice(msg, opts) {
+  opts = opts || {};
+  const toast = document.getElementById('editor-toast');
+  const msgEl = document.getElementById('editor-toast-msg');
+  const actionEl = document.getElementById('editor-toast-action');
+  if (!toast || !msgEl || !actionEl) return;
+  clearTimeout(editorToastTimer);
+  msgEl.textContent = msg;
+  if (opts.actionLabel) {
+    actionEl.textContent = opts.actionLabel;
+    actionEl.hidden = false;
+    actionEl.onclick = () => {
+      toast.hidden = true;
+      actionEl.onclick = null;
+      if (opts.onAction) opts.onAction();
+    };
+  } else {
+    actionEl.hidden = true;
+    actionEl.onclick = null;
+  }
+  toast.hidden = false;
+  editorToastTimer = setTimeout(() => { toast.hidden = true; }, opts.duration || 5000);
+  announce(msg);
+}
+
 function escapeHtml(str) {
   const d = document.createElement('div');
   d.appendChild(document.createTextNode(str));
@@ -1826,7 +1854,14 @@ function saveState() {
       TodoMapsIndex.touch(MAP_URL_ID);
       if (window.TodoMapsCloud && TodoMapsCloud.enabled) TodoMapsCloud.schedulePush(MAP_URL_ID);
     }
-  } catch(e) { /* storage full or unavailable — silent fail */ }
+  } catch(e) {
+    // Storage full or unavailable — say so once instead of losing edits in
+    // silence.
+    if (!saveState.warned) {
+      saveState.warned = true;
+      showEditorNotice('this browser’s storage is full — changes aren’t saving');
+    }
+  }
 }
 
 function loadSavedState() {
@@ -2007,75 +2042,122 @@ function exportGrid() {
   announce('Grid exported.');
 }
 
+// Rebuild the visible phase from state — shared by import, cleanup undo, and
+// cloud pull. Assumes state (tasks/orders/positions/phase) is already set.
+function rerenderFromState() {
+  if (state.phase === 'scatter') {
+    showPhase('scatter');
+    const scatterCanvas = document.getElementById('scatter-canvas');
+    scatterCanvas.classList.remove('history-view');
+    scatterCanvas.querySelectorAll('.canvas-card').forEach(c => c.remove());
+    hSelected = hNowIdx();
+    document.fonts.ready.then(() => {
+      const canvas = document.getElementById('scatter-canvas');
+      const rect = canvas.getBoundingClientRect();
+      if (rect.width > 0) {
+        if (Object.keys(state.cardPositions).length === 0) {
+          state.cardPositions = computeCanvasPositions(rect.width, rect.height);
+          state.scatterSig = rankingSignature();
+        }
+        buildCanvasCards(prefersReducedMotion());
+        canvas.querySelectorAll('.canvas-card').forEach(c => { c.style.opacity = '1'; });
+        drawQuadrantLines(prefersReducedMotion());
+        buildHistoryTimeline();
+      }
+    });
+  } else if (state.phase === 'sort-impact') {
+    renderSortList('impact');
+    showPhase('sort-impact');
+  } else if (state.phase === 'sort-effort') {
+    renderSortList('impact');
+    renderSortList('effort');
+    showPhase('sort-effort');
+  } else {
+    // dump phase — rebuild dump cards
+    renderDumpCards();
+    if (state.tasks.length > 0) {
+      document.getElementById('phase-dump').classList.add('has-tasks');
+    }
+    showPhase('dump');
+  }
+}
+
+// Accept only things shaped like our own exports, and only the fields we
+// wrote. Returns null (rather than throwing) for anything else.
+function parseGridFile(text) {
+  const data = JSON.parse(text);
+  const g = data && data.grid;
+  if (!g || !Array.isArray(g.tasks)) return null;
+  const tasks = [];
+  for (const t of g.tasks) {
+    if (!t || typeof t.id !== 'string' || typeof t.text !== 'string') return null;
+    tasks.push({ id: t.id, text: t.text });
+  }
+  const ids = new Set(tasks.map(t => t.id));
+  const idList = (v) => (Array.isArray(v) ? v.filter(id => ids.has(id)) : []);
+  const positions = {};
+  if (g.cardPositions && typeof g.cardPositions === 'object') {
+    Object.keys(g.cardPositions).forEach(id => {
+      const p = g.cardPositions[id];
+      if (ids.has(id) && p && isFinite(p.x) && isFinite(p.y)) {
+        positions[id] = { x: Number(p.x), y: Number(p.y) };
+      }
+    });
+  }
+  // Keep makeId collision-free even against hand-edited files: the counter
+  // must clear every imported t<n> id.
+  let counter = (typeof g.idCounter === 'number' && isFinite(g.idCounter)) ? g.idCounter : 0;
+  tasks.forEach(t => {
+    const n = /^t(\d+)$/.exec(t.id);
+    if (n) counter = Math.max(counter, parseInt(n[1], 10));
+  });
+  return {
+    tasks,
+    impactOrder: idList(g.impactOrder),
+    effortOrder: idList(g.effortOrder),
+    phase: PHASE_ORDER.indexOf(g.phase) !== -1 ? g.phase : 'dump',
+    cardPositions: positions,
+    done: idList(g.done),
+    idCounter: counter,
+    history: Array.isArray(g.history) ? g.history : [],
+  };
+}
+
 function importGrid(file) {
   const reader = new FileReader();
+  reader.onerror = function() {
+    showEditorNotice('couldn’t read that file.');
+  };
   reader.onload = function(e) {
-    try {
-      const data = JSON.parse(e.target.result);
-      if (!data.grid || !data.grid.tasks) {
-        announce('Invalid file. Could not restore grid.');
-        return;
-      }
-      const g = data.grid;
-      state.tasks = g.tasks || [];
-      state.impactOrder = g.impactOrder || [];
-      state.effortOrder = g.effortOrder || [];
-      state.phase = g.phase || 'dump';
-      state.cardPositions = g.cardPositions || {};
-      state.done = new Set(g.done || []);
-      idCounter = g.idCounter || 0;
-      state.history = g.history || [];
-      state.viewingIdx = null;
-      // Sandboxes only ever live on the map screen — never restore an
-      // imported file into the (uninitialized) dump/sort screens there.
-      if (window.SHARED_VIEW_ACTIVE) state.phase = 'scatter';
-      // Imported files predate scatterSig — adopt the imported rankings as the
-      // signature when every task has a position, so the map isn't reshuffled.
-      state.scatterSig =
-        (state.tasks.length && state.tasks.every(t => state.cardPositions[t.id]))
-          ? rankingSignature() : null;
-      saveState();
-
-      // Re-render from the restored phase
-      if (state.phase === 'scatter') {
-        showPhase('scatter');
-        const scatterCanvas = document.getElementById('scatter-canvas');
-        scatterCanvas.classList.remove('history-view');
-        scatterCanvas.querySelectorAll('.canvas-card').forEach(c => c.remove());
-        hSelected = hNowIdx();
-        document.fonts.ready.then(() => {
-          const canvas = document.getElementById('scatter-canvas');
-          const rect = canvas.getBoundingClientRect();
-          if (rect.width > 0) {
-            if (Object.keys(state.cardPositions).length === 0) {
-              state.cardPositions = computeCanvasPositions(rect.width, rect.height);
-              state.scatterSig = rankingSignature();
-            }
-            buildCanvasCards(prefersReducedMotion());
-            canvas.querySelectorAll('.canvas-card').forEach(c => { c.style.opacity = '1'; });
-            drawQuadrantLines(prefersReducedMotion());
-            buildHistoryTimeline();
-          }
-        });
-      } else if (state.phase === 'sort-impact') {
-        renderSortList('impact');
-        showPhase('sort-impact');
-      } else if (state.phase === 'sort-effort') {
-        renderSortList('impact');
-        renderSortList('effort');
-        showPhase('sort-effort');
-      } else {
-        // dump phase — rebuild dump cards
-        renderDumpCards();
-        if (state.tasks.length > 0) {
-          document.getElementById('phase-dump').classList.add('has-tasks');
-        }
-        showPhase('dump');
-      }
-      announce('Grid restored from file.');
-    } catch(err) {
-      announce('Could not read file. Make sure it is a valid export.');
+    // Validate the whole candidate before touching live state — a bad file
+    // must never leave a half-imported board behind.
+    let candidate = null;
+    try { candidate = parseGridFile(e.target.result); }
+    catch (err) { candidate = null; }
+    if (!candidate) {
+      showEditorNotice('couldn’t import — not a to-do map export.');
+      return;
     }
+    state.tasks = candidate.tasks;
+    state.impactOrder = candidate.impactOrder;
+    state.effortOrder = candidate.effortOrder;
+    state.phase = candidate.phase;
+    state.cardPositions = candidate.cardPositions;
+    state.done = new Set(candidate.done);
+    idCounter = candidate.idCounter;
+    state.history = candidate.history;
+    state.viewingIdx = null;
+    // Sandboxes only ever live on the map screen — never restore an
+    // imported file into the (uninitialized) dump/sort screens there.
+    if (window.SHARED_VIEW_ACTIVE) state.phase = 'scatter';
+    // Imported files predate scatterSig — adopt the imported rankings as the
+    // signature when every task has a position, so the map isn't reshuffled.
+    state.scatterSig =
+      (state.tasks.length && state.tasks.every(t => state.cardPositions[t.id]))
+        ? rankingSignature() : null;
+    saveState();
+    rerenderFromState();
+    announce('Grid restored from file.');
   };
   reader.readAsText(file);
 }
@@ -3273,6 +3355,43 @@ async function bootSharedView(mapId) {
   });
 }
 
+// ?map= pointed at a map this browser doesn't know — a deleted map, someone
+// else's link, or a bookmark from another profile. Never open the editor on
+// it: everything typed would save into a slot no screen can ever reach.
+function renderMapNotFound() {
+  window.MAP_VIEW_HALTED = true;
+  if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+  const overlay = document.createElement('div');
+  overlay.className = 'share-error-overlay';
+  const h = document.createElement('h2');
+  h.textContent = 'map not found';
+  const p = document.createElement('p');
+  p.textContent = 'this map isn’t saved in this browser.';
+  const link = document.createElement('a');
+  link.href = '../home/';
+  link.textContent = 'back to your maps →';
+  overlay.appendChild(h);
+  overlay.appendChild(p);
+  overlay.appendChild(link);
+  if (window.TodoMapsCloud && TodoMapsCloud.enabled) {
+    const hint = document.createElement('p');
+    hint.textContent = 'signed-in maps may still be syncing';
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = 'check again';
+    btn.style.cssText = 'margin-top:4px;padding:8px 18px;border:1px solid rgba(82,99,71,0.25);border-radius:8px;background:none;font-family:inherit;font-size:13px;color:var(--sage,#526347);cursor:pointer;';
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      try { await TodoMapsCloud.syncNow(); } catch (e) { /* stays not-found */ }
+      if (TodoMapsIndex.get(MAP_URL_ID)) { location.reload(); return; }
+      btn.textContent = 'still not here';
+    });
+    overlay.appendChild(hint);
+    overlay.appendChild(btn);
+  }
+  document.body.appendChild(overlay);
+}
+
 // ──────────────────────────────────────────────────────────────────────────────
 // Boot
 // ──────────────────────────────────────────────────────────────────────────────
@@ -3284,12 +3403,22 @@ function init() {
     bootSharedView(TodoMapShare.sharedMapId);
     return;
   }
-  // An urgency/importance map opened on this page — hand it to the main
-  // editor before anything touches its slot.
-  if (MAP_URL_ID && window.TodoMapsIndex) {
+  // Owner mode always rides on ?map=. The head bounce catches bare visits;
+  // this covers what it can't see, like a hash share.js refused to parse.
+  if (!MAP_URL_ID) {
+    location.replace('../home/');
+    return;
+  }
+  if (window.TodoMapsIndex) {
     const entry = TodoMapsIndex.get(MAP_URL_ID);
+    // An urgency/importance map opened on this page — hand it to the main
+    // editor before anything touches its slot.
     if (entry && entry.kind !== 'impact-effort') {
       location.replace('../?map=' + encodeURIComponent(MAP_URL_ID));
+      return;
+    }
+    if (!entry) {
+      renderMapNotFound();
       return;
     }
   }
@@ -3298,7 +3427,17 @@ function init() {
   initToolbar();
   initExportImport();
   if (window.TodoMapShare) {
-    TodoMapShare.initShareUI({ kind: SHARE_MAP_KIND, serialize: serializeBoardForShare });
+    TodoMapShare.initShareUI({
+      kind: SHARE_MAP_KIND,
+      serialize: serializeBoardForShare,
+      // Share records live on this map's index entry — one link per map.
+      getShare: () => {
+        const entry = window.TodoMapsIndex ? TodoMapsIndex.get(MAP_URL_ID) : null;
+        return (entry && entry.share) || null;
+      },
+      setShare: (rec) => { if (window.TodoMapsIndex) TodoMapsIndex.setShare(MAP_URL_ID, rec); },
+      clearShare: () => { if (window.TodoMapsIndex) TodoMapsIndex.setShare(MAP_URL_ID, null); },
+    });
   }
   initExistingTasksLine();
   initCanvasAdd();
@@ -3362,13 +3501,33 @@ function init() {
   if (navigator.storage && navigator.storage.persist) {
     navigator.storage.persist();
   }
+
+  // Another tab can re-home this map (a sign-in ownership conflict) or
+  // delete it. Follow the forwarding note when there is one; otherwise show
+  // the not-found screen instead of letting edits pile into an unreachable
+  // slot.
+  window.addEventListener('storage', (e) => {
+    if (!MAP_URL_ID || !window.TodoMapsIndex) return;
+    if (e.key !== 'todoMapsIndex.v1') return;
+    if (TodoMapsIndex.get(MAP_URL_ID)) {
+      // The map came back (a delete undone in another tab) — resume.
+      if (window.MAP_VIEW_HALTED) location.reload();
+      return;
+    }
+    const moved = TodoMapsIndex.movedTo(MAP_URL_ID);
+    if (moved) {
+      location.replace('?map=' + encodeURIComponent(moved));
+    } else if (!window.MAP_VIEW_HALTED) {
+      renderMapNotFound();
+    }
+  });
 }
 
 init();
 
 // Ensure typewriter starts on fresh load after everything is initialized
 document.fonts.ready.then(() => {
-  if (window.SHARED_VIEW_ACTIVE) return;
+  if (window.SHARED_VIEW_ACTIVE || window.MAP_VIEW_HALTED) return;
   if (state.tasks.length === 0 && state.phase === 'dump') {
     const wrap = document.querySelector('.dump-input-wrap');
     if (wrap) wrap.classList.remove('has-value');

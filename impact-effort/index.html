@@ -14,8 +14,11 @@
 // link (#m=<id>). A bare visit belongs on the home screen — bounce before
 // anything renders.
 (function () {
-  var hasMap = /(?:\?|&)map=/.test(location.search);
-  var hasShare = /^#m=/.test(location.hash);
+  // Both patterns insist on a real value — an empty ?map= or a garbage #m=
+  // must bounce too, or the editor would fall back to the legacy pre-home
+  // storage slot. The #m= shape mirrors share.js exactly.
+  var hasMap = /[?&]map=[^&]/.test(location.search);
+  var hasShare = /^#m=[A-Za-z0-9]{4,}$/.test(location.hash);
   if (!hasMap && !hasShare) location.replace('../home/');
 })();
 </script>
@@ -1510,6 +1513,34 @@ button:focus-visible {
 }
 
 /* ── Mobile: narrow screens ── */
+/* ── Editor notice pill (storage failures, cleanup undo, import errors) ── */
+.editor-toast {
+  position: fixed;
+  bottom: 88px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 380;
+  background: var(--card-bg);
+  border-radius: 999px;
+  box-shadow: 0 8px 24px rgba(46, 52, 45, 0.12);
+  padding: 10px 18px;
+  font-size: 13px;
+  color: var(--text-dim);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.editor-toast[hidden] { display: none; }
+.editor-toast button {
+  border: none;
+  background: none;
+  font: inherit;
+  color: var(--sage-interactive);
+  cursor: pointer;
+  padding: 0;
+}
+.editor-toast button:hover { color: var(--sage); }
+
 @media (max-width: 480px) {
   .dump-inner { width: min(600px, 100% - 32px); }
   .sort-inner > .sort-progress,
@@ -1743,6 +1774,11 @@ Start by adding what's on your mind.</p>
   </section>
 
 </div><!-- .flow-container -->
+
+<div id="editor-toast" class="editor-toast" role="status" hidden>
+  <span id="editor-toast-msg"></span>
+  <button id="editor-toast-action" type="button" hidden></button>
+</div>
 
 <script src="../share-config.js"></script>
 <script src="../share.js"></script>
