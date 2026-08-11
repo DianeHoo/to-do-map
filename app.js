@@ -407,7 +407,7 @@ function updateSortButton() {
   const label = btn.querySelector('.nav-label');
   btn.classList.toggle('visible', state.tasks.length > 0);
   if (hiddenTaskIds.size > 0) {
-    label.textContent = `sort all ${state.tasks.length} tasks`;
+    label.textContent = `sort all ${state.tasks.length} ${state.tasks.length === 1 ? 'task' : 'tasks'}`;
   } else {
     label.textContent = 'ready to sort';
   }
@@ -482,7 +482,7 @@ function enterSortCardEdit(card, pass) {
 
   function save() {
     textEl.setAttribute('contenteditable', 'false');
-    const plainText = textEl.textContent.trim() || originalText;
+    const plainText = (textEl.textContent.trim() || originalText).slice(0, 500);
     if (plainText !== originalText) {
       const t = state.tasks.find(t => t.id === taskId);
       if (t) t.text = plainText;
@@ -1164,7 +1164,7 @@ function buildCanvasCards(rm) {
         textEl.setAttribute('contenteditable', 'false');
         card._suppressNextClick = true;
         setTimeout(() => { card._suppressNextClick = false; }, 400);
-        const plainText = textEl.textContent.trim() || originalText;
+        const plainText = (textEl.textContent.trim() || originalText).slice(0, 500);
         if (plainText !== originalText) {
           const t = state.tasks.find(t => t.id === taskId);
           if (t) t.text = plainText;
@@ -1202,7 +1202,7 @@ function buildCanvasCards(rm) {
       if (card._isEditing) return;
       if (card.querySelector('[contenteditable="true"]') || card.querySelector('.sort-edit-input')) return;
       const now = Date.now();
-      if (now - lastTapTime < 300) {
+      if (now - lastTapTime < 250) {
         card.dispatchEvent(new Event('dblclick', { bubbles: true }));
         lastTapTime = 0;
       } else {
@@ -1417,11 +1417,17 @@ function updateStrikePath(card) {
   const w = strike.offsetWidth;
   const h = strike.offsetHeight;
 
-  // If dimensions are 0, the card hasn't laid out yet — retry
+  // If dimensions are 0, the card hasn't laid out yet — retry, but stop
+  // once the card leaves the DOM (cleanup removes cards mid-retry) and
+  // give up after ~2s rather than polling forever.
   if (!w || w < 2 || !h || h < 2) {
+    const tries = (parseInt(card.dataset.strikeTries, 10) || 0) + 1;
+    if (!card.isConnected || tries > 20) { delete card.dataset.strikeTries; return; }
+    card.dataset.strikeTries = tries;
     setTimeout(() => updateStrikePath(card), 100);
     return;
   }
+  delete card.dataset.strikeTries;
 
   // Set viewBox for proper scaling
   svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
@@ -1646,7 +1652,7 @@ function addTaskToCanvas(text) {
       card._suppressNextClick = true;
       setTimeout(() => { card._suppressNextClick = false; }, 400);
       const html = textEl.innerHTML;
-      const plainText = textEl.textContent.trim() || originalText;
+      const plainText = (textEl.textContent.trim() || originalText).slice(0, 500);
       if (plainText !== originalText) {
         const t = state.tasks.find(t => t.id === taskId);
         if (t) t.text = plainText;
@@ -1683,7 +1689,7 @@ function addTaskToCanvas(text) {
     if (card._isEditing) return;
     if (card.querySelector('[contenteditable="true"]') || card.querySelector('.sort-edit-input')) return;
     const now = Date.now();
-    if (now - lastTapTime < 300) {
+    if (now - lastTapTime < 250) {
       card.dispatchEvent(new Event('dblclick', { bubbles: true }));
       lastTapTime = 0;
     } else {
@@ -3364,6 +3370,7 @@ function scaleSharedPositions(positions, sourceCanvas, targetW, targetH) {
   Object.keys(positions).forEach(id => {
     const p = positions[id];
     if (!p) return;
+    if (!isFinite(p.x) || !isFinite(p.y)) return; // junk coords → recompute path
     let x = (p.x / sw) * targetW;
     let y = (p.y / sh) * targetH;
     x = Math.min(Math.max(x, EDGE), Math.max(EDGE, targetW - CARD_W - EDGE));
@@ -3475,7 +3482,10 @@ async function bootSharedView(mapId) {
   // Build a fresh sandbox from the published version
   function seedFromRecord() {
     const data = record.data || {};
-    state.tasks = Array.isArray(data.tasks) ? data.tasks : [];
+    // Trust nothing about a remote payload's shape: ids must be plain tokens
+    // (they get interpolated into querySelector strings) and text a string.
+    state.tasks = (Array.isArray(data.tasks) ? data.tasks : []).filter(t =>
+      t && typeof t.id === 'string' && /^[\w-]+$/.test(t.id) && typeof t.text === 'string');
     state.done = new Set(data.done || []);
     state.urgencyOrder = [];
     state.importanceOrder = [];
@@ -3599,6 +3609,9 @@ function init() {
       renderMapNotFound();
       return;
     }
+    // The tab title carries the map name, so several open maps are tellable
+    // apart in the tab strip.
+    document.title = entry.name + ' · To-Do Map';
   }
   initSort();
   initToolbar();

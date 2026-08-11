@@ -23,6 +23,11 @@
   const LEGACY_IMPACT_KEY = 'todomap-impact-effort-state';
 
   const KINDS = ['urgency-importance', 'impact-effort'];
+  // One source for the human names — home and the dock both render these.
+  const KIND_LABELS = {
+    'urgency-importance': 'urgency × importance',
+    'impact-effort': 'impact × effort',
+  };
 
   function slotKey(id) { return SLOT_PREFIX + id; }
 
@@ -112,15 +117,22 @@
     const data = readData(id);
     if (data && !writeData(copyId, data)) return null;
     const entries = readIndex();
+    // "name copy", "name copy 2", … — repeated duplicates stay tellable apart
+    const names = new Set(entries.map(e => e.name));
+    let name = entry.name + ' copy';
+    for (let n = 2; names.has(name); n++) name = entry.name + ' copy ' + n;
     const now = Date.now();
     entries.push({
       id: copyId,
-      name: entry.name + ' copy',
+      name,
       kind: entry.kind,
       createdAt: now,
       updatedAt: now,
     });
-    if (!writeIndex(entries)) return null;
+    if (!writeIndex(entries)) {
+      dropSlot(copyId); // don't leak the copied data when the index write failed
+      return null;
+    }
     return copyId;
   }
 
@@ -241,6 +253,7 @@
 
   window.TodoMapsIndex = {
     KINDS,
+    KIND_LABELS,
     slotKey,
     list: readIndex,
     get,

@@ -20,10 +20,7 @@
   const toastAction = document.getElementById('toast-action');
   const announcer = document.getElementById('announcer');
 
-  const KIND_LABELS = {
-    'urgency-importance': 'urgency × importance',
-    'impact-effort': 'impact × effort',
-  };
+  const KIND_LABELS = Maps.KIND_LABELS;
 
   // Cards render newest-edited first; these two survive re-renders.
   let renamingId = null;
@@ -46,6 +43,7 @@
 
   let toastTimer = null;
   let toastOnExpire = null;
+  let queuedToast = null;
 
   function hideToast(runExpire) {
     clearTimeout(toastTimer);
@@ -54,12 +52,24 @@
     const expire = toastOnExpire;
     toastOnExpire = null;
     if (runExpire && expire) expire();
+    // An informational toast that arrived during an undo window shows now
+    if (queuedToast) {
+      const q = queuedToast;
+      queuedToast = null;
+      showToast(q.msg, q.opts);
+    }
   }
 
   function showToast(msg, opts) {
-    // A pending delete's cleanup runs now so toasts never queue up.
-    hideToast(true);
     opts = opts || {};
+    // Never let a passing status message forfeit a pending undo (its expiry
+    // is destructive) — park the new toast until the undo window resolves.
+    // A second destructive toast settles the first one immediately instead.
+    if (toastOnExpire && !opts.onExpire) {
+      queuedToast = { msg, opts };
+      return;
+    }
+    hideToast(true);
     toastMsg.textContent = msg;
     if (opts.actionLabel) {
       toastAction.textContent = opts.actionLabel;
@@ -336,9 +346,11 @@
     });
   }
 
+  // Resolves true only when the link actually reached the clipboard — the
+  // toast copy stops claiming "copied" when it didn't.
   function copyText(text) {
     if (navigator.clipboard && navigator.clipboard.writeText) {
-      return navigator.clipboard.writeText(text).catch(() => fallbackCopy(text));
+      return navigator.clipboard.writeText(text).then(() => true, () => fallbackCopy(text));
     }
     return Promise.resolve(fallbackCopy(text));
   }
@@ -350,8 +362,10 @@
     ta.style.opacity = '0';
     document.body.appendChild(ta);
     ta.select();
-    try { document.execCommand('copy'); } catch (e) { /* clipboard unavailable */ }
+    let ok = false;
+    try { ok = document.execCommand('copy'); } catch (e) { /* clipboard unavailable */ }
     ta.remove();
+    return ok;
   }
 
   async function shareMap(entry) {
@@ -366,7 +380,7 @@
     const shareUrl = (id) =>
       new URL(entry.kind === 'impact-effort' ? '../impact-effort/' : '../', location.href).href + '#m=' + id;
 
-    showToast('publishing…', { duration: 60000 });
+    showToast('publishing…', { duration: 15000 });
     try {
       const existing = entry.share;
       if (existing && existing.id && existing.ownerKey) {
@@ -374,8 +388,8 @@
         const ok = await TodoMapShare.update(existing.id, existing.ownerKey, payload);
         if (ok) {
           Maps.setShare(entry.id, { ...existing, updatedAt: new Date().toISOString() });
-          await copyText(shareUrl(existing.id));
-          showToast('share link updated and copied');
+          const copied = await copyText(shareUrl(existing.id));
+          showToast(copied ? 'share link updated and copied' : 'share link updated — couldn’t reach the clipboard');
           return;
         }
         // Link was deleted server-side — fall through and publish fresh.
@@ -388,8 +402,8 @@
         publishedAt: now,
         updatedAt: now,
       });
-      await copyText(shareUrl(res.id));
-      showToast('share link copied');
+      const copied = await copyText(shareUrl(res.id));
+      showToast(copied ? 'share link copied' : 'link published — couldn’t reach the clipboard');
     } catch (err) {
       showToast('couldn’t share: ' + err.message);
     }
@@ -429,9 +443,19 @@
   }
   function closeKindPicker() { kindPicker.hidden = true; kindTrap.closed(); }
 
+  // "untitled map", "untitled map 2", … — identical names make the dock and
+  // grid unreadable, so new maps count up.
+  function untitledName() {
+    const names = new Set(Maps.list().map((e) => e.name));
+    if (!names.has('untitled map')) return 'untitled map';
+    let n = 2;
+    while (names.has('untitled map ' + n)) n++;
+    return 'untitled map ' + n;
+  }
+
   function createMap(kind) {
     closeKindPicker();
-    const id = Maps.create({ kind, name: 'untitled map' });
+    const id = Maps.create({ kind, name: untitledName() });
     if (id === null) {
       showToast('couldn’t create a map — browser storage is unavailable.');
       return;
@@ -441,13 +465,21 @@
   }
 
   function importFromFile(file) {
+    // Exports are a few KB; anything huge is the wrong file.
+    if (file.size > 1024 * 1024) {
+      showToast('couldn’t import — that file is too large to be a map export.');
+      return;
+    }
     const reader = new FileReader();
+    reader.onerror = () => showToast('couldn’t read that file.');
     reader.onload = (e) => {
       let data = null;
       try { data = JSON.parse(e.target.result); } catch (err) { /* handled below */ }
       const g = data && data.grid;
-      if (!g || !Array.isArray(g.tasks)) {
-        showToast('couldn’t import — not a To-Do Map export.');
+      const tasksOk = g && Array.isArray(g.tasks) &&
+        g.tasks.every((t) => t && typeof t.id === 'string' && typeof t.text === 'string');
+      if (!tasksOk) {
+        showToast('couldn’t import — not a to-do map export.');
         return;
       }
       // Exports carry the variant's ordering fields, which tells us the kind.
@@ -468,7 +500,7 @@
       cloudPush(id);
       closeKindPicker();
       render();
-      announce('Map imported.');
+      announce('map imported');
     };
     reader.readAsText(file);
   }

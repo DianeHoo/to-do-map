@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Impact / Effort Map</title>
+<title>To-Do Map · impact × effort</title>
 <meta property="og:title" content="Impact / Effort Map | Find your quick wins.">
 <meta property="og:description" content="Sort tasks by impact and effort. They land in four quadrants — quick wins, big bets, fill-ins, and thankless tasks — so you can see what's worth doing at a glance.">
 <meta property="og:image" content="https://todomap.live/preview.png">
@@ -44,14 +44,14 @@
   --card-bg: #ffffff;
   --text: #2e342d;
   --text-dim: rgba(46, 52, 45, 0.58);
-  --text-muted: rgba(46, 52, 45, 0.3);
+  --text-muted: rgba(46, 52, 45, 0.55);
   --text-ghost: rgba(46, 52, 45, 0.2);
   --sage: #526347;
   --sage-08: rgba(82, 99, 71, 0.08);
   --sage-15: rgba(82, 99, 71, 0.15);
   --sage-20: rgba(82, 99, 71, 0.20);
   --sage-25: rgba(82, 99, 71, 0.25);
-  --sage-45: rgba(82, 99, 71, 0.55);
+  --sage-45: rgba(82, 99, 71, 0.72);
   --sage-50: rgba(82, 99, 71, 0.60);
   --sage-interactive: rgba(82, 99, 71, 0.82);
   --sage-label: rgba(82, 99, 71, 0.68);
@@ -584,7 +584,8 @@ html, body {
 }
 .sort-card.long-press-charging,
 .canvas-card.long-press-charging {
-  animation: lp-charge 400ms ease-out forwards;
+  /* the 80ms delay keeps a quick tap from flickering the scale-up */
+  animation: lp-charge 320ms ease-out 80ms forwards;
 }
 @media (prefers-reduced-motion: reduce) {
   .sort-card.long-press-charging,
@@ -740,18 +741,22 @@ html, body {
 .corner-hint.quick { bottom: 40px; right: 36px; }
 .corner-hint.later { bottom: 40px; left: 36px; }
 
-/* Interaction hints — top-left, below "Soon" hint */
+/* Interaction hints — top-left, below "Soon" hint.
+   Above the cards (z 1) so a card drifting into the corner can't cover
+   the tips toggle. */
 .interaction-hints {
   position: absolute;
   top: 100px;
   left: 32px;
-  z-index: 0;
+  z-index: 30;
   pointer-events: auto;
 }
 .tips-toggle {
   background: none;
   border: none;
-  padding: 0;
+  /* small text, real hit area */
+  padding: 12px;
+  margin: -12px;
   font-family: var(--font-body);
   font-size: 11px;
   color: var(--sage-45);
@@ -1077,7 +1082,9 @@ html, body {
   font-size: 11px;
   color: var(--sage-interactive);
   cursor: pointer;
-  padding: 4px 0;
+  /* small text, real hit area */
+  padding: 12px 6px;
+  margin: -8px -6px;
   letter-spacing: 0.02em;
   transition: color 150ms;
 }
@@ -1417,10 +1424,10 @@ button:focus-visible {
   right: 204px;
   z-index: 40;
   display: none;
-  opacity: 0.45;
+  opacity: 0.7;
   transition: opacity 200ms;
 }
-.history-timeline:hover { opacity: 0.85; }
+.history-timeline:hover { opacity: 1; }
 .history-timeline.has-history { display: block; }
 
 /* 20 + 8 + 144 + 8 + 20 = 200px shell */
@@ -1440,6 +1447,9 @@ button:focus-visible {
   justify-content: center;
   cursor: pointer;
   transition: opacity 0.15s;
+  padding: 14px 12px;
+  margin: -14px -12px;
+  box-sizing: content-box;
 }
 .h-ov-btn:hover { opacity: 0.45; }
 .h-ov-btn.hidden { opacity: 0; pointer-events: none; }
@@ -1607,7 +1617,7 @@ button:focus-visible {
         <div class="dump-input-wrap">
           <input
             type="text"
-            id="dump-input"
+            id="dump-input" maxlength="500"
             placeholder=""
             aria-label="Add a task"
             autocomplete="off"
@@ -1740,7 +1750,7 @@ Start by adding what's on your mind.</p>
       <!-- Canvas toolbar — bottom center -->
       <div class="canvas-toolbar" id="canvas-toolbar">
         <div class="canvas-add-input-wrap" id="canvas-add-input-wrap">
-          <input type="text" class="canvas-add-input" id="canvas-add-input" placeholder="add a task" aria-label="Add a new task to the map" autocomplete="off">
+          <input type="text" class="canvas-add-input" id="canvas-add-input" maxlength="500" placeholder="add a task" aria-label="Add a new task to the map" autocomplete="off">
         </div>
         <div class="toolbar-item">
           <button class="toolbar-btn toolbar-btn-add" id="btn-back-to-top" aria-label="Back to the top" title="Back to the top"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true"><line x1="5" y1="3" x2="15" y2="3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><line x1="10" y1="16" x2="10" y2="7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><polyline points="5,12 10,7 15,12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></button>
@@ -1769,7 +1779,7 @@ Start by adding what's on your mind.</p>
         <div class="history-shell">
           <div class="h-ov-btn hidden" id="h-btn-left" aria-label="View older snapshot">
             <svg viewBox="0 0 12 12" width="12" height="12" fill="none" aria-hidden="true">
-              <path d="M7.5 4L4.5 6.18182L7.5 8" stroke="#D8D8D8" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M7.5 4L4.5 6.18182L7.5 8" stroke="#9aa294" stroke-linecap="round" stroke-linejoin="round"/>
             </svg>
           </div>
           <div class="history-viewport" id="h-viewport">
@@ -1777,7 +1787,7 @@ Start by adding what's on your mind.</p>
           </div>
           <div class="h-ov-btn hidden" id="h-btn-right" aria-label="View newer snapshot">
             <svg viewBox="0 0 12 12" width="12" height="12" fill="none" aria-hidden="true">
-              <path d="M4.5 4L7.5 6.18182L4.5 8" stroke="#D8D8D8" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M4.5 4L7.5 6.18182L4.5 8" stroke="#9aa294" stroke-linecap="round" stroke-linejoin="round"/>
             </svg>
           </div>
         </div>

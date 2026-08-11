@@ -32,10 +32,7 @@
     return base + '?map=' + encodeURIComponent(entry.id);
   }
 
-  var KIND_LABELS = {
-    'urgency-importance': 'urgency × importance',
-    'impact-effort': 'impact × effort',
-  };
+  var KIND_LABELS = Maps.KIND_LABELS || {};
 
   // ── Styles ──────────────────────────────────────────────────────────────────
 
