@@ -263,6 +263,13 @@ function createDumpCard(task) {
 
 function deleteDumpTask(id) {
   state.tasks = state.tasks.filter(t => t.id !== id);
+  // The task must vanish from every structure, or "clean up" later counts
+  // phantoms that aren't on the board and announces a cleanup that fades
+  // zero cards.
+  state.done.delete(id);
+  delete state.cardPositions[id];
+  state.impactOrder = state.impactOrder.filter(x => x !== id);
+  state.effortOrder = state.effortOrder.filter(x => x !== id);
   const card = document.querySelector(`.dump-card[data-id="${id}"]`);
   if (card) {
     card.style.transition = 'opacity 150ms ease, transform 150ms ease';
@@ -425,6 +432,19 @@ function transitionToSortImpact() {
 let dragState = null;
 let canvasDragActive = false;
 
+// Paste as plain text in the inline editors — pasted markup used to land in
+// the contenteditable verbatim (running any embedded handlers at paste time)
+// and then silently vanish on reload, since only textContent persists.
+function attachPlainPaste(textEl) {
+  if (textEl._pastePlain) return;
+  textEl._pastePlain = true;
+  textEl.addEventListener('paste', (ev) => {
+    ev.preventDefault();
+    const txt = ev.clipboardData ? ev.clipboardData.getData('text/plain') : '';
+    document.execCommand('insertText', false, txt);
+  });
+}
+
 function enterSortCardEdit(card, pass) {
   if (card.querySelector('.sort-edit-input')) return;
   const textEl = card.querySelector('.card-text');
@@ -435,6 +455,7 @@ function enterSortCardEdit(card, pass) {
   textEl.setAttribute('contenteditable', 'true');
   textEl.style.outline = 'none';
   textEl.focus();
+  attachPlainPaste(textEl);
 
   // Place cursor at end
   const range = document.createRange();
@@ -902,11 +923,24 @@ function rankingSignature() {
   return state.impactOrder.join('|') + '~' + state.effortOrder.join('|');
 }
 
+// Real card metrics for the scatter math. CSS caps cards at 200px wide
+// (160 under 480px) with a 44px min height — the old hardcoded 140×36
+// under-measured every card, so the separation pass packed them into
+// overlaps. The edge padding scales down on narrow canvases: a fixed 64px
+// left a 375px phone only 247px of usable width.
+function canvasCardMetrics(canvasW) {
+  return {
+    cardW: canvasW <= 480 ? 160 : 200,
+    cardH: 44,
+    edgePad: Math.min(64, Math.max(20, Math.round(canvasW * 0.07))),
+  };
+}
+
 function computeCanvasPositions(canvasW, canvasH) {
   const n = state.tasks.length;
   if (n === 0) return {};
 
-  const EDGE_PAD = 64; // keep cards away from edge labels and canvas border
+  const EDGE_PAD = canvasCardMetrics(canvasW).edgePad;
   const MIN_GAP = 32;
 
   const usableW = canvasW - EDGE_PAD * 2;
@@ -918,8 +952,11 @@ function computeCanvasPositions(canvasW, canvasH) {
     const impactRank = state.impactOrder.indexOf(task.id);
     const effortRank = state.effortOrder.indexOf(task.id);
 
-    const impactNorm = n > 1 ? impactRank / (n - 1) : 0.5;
-    const effortNorm = n > 1 ? effortRank / (n - 1) : 0.5;
+    // A task missing from an order (shared-view sandboxes empty the
+    // rankings) belongs at the middle of that axis — a negative norm used
+    // to clamp every unranked card onto the same edge point.
+    const impactNorm = impactRank === -1 ? 0.5 : (n > 1 ? impactRank / (n - 1) : 0.5);
+    const effortNorm = effortRank === -1 ? 0.5 : (n > 1 ? effortRank / (n - 1) : 0.5);
 
     // X axis = effort (rank 0 = most effort → right). Y axis = impact (rank 0 = most impact → top).
     const x = EDGE_PAD + (1 - effortNorm) * usableW;
@@ -932,8 +969,7 @@ function computeCanvasPositions(canvasW, canvasH) {
 }
 
 function forceNudge(positions, canvasW, canvasH, edgePad, minGap) {
-  const CARD_W = 140;
-  const CARD_H = 36;
+  const { cardW: CARD_W, cardH: CARD_H } = canvasCardMetrics(canvasW);
   const ITERATIONS = 40;
 
   const ids = Object.keys(positions);
@@ -1093,6 +1129,7 @@ function buildCanvasCards(rm) {
       textEl.setAttribute('contenteditable', 'true');
       textEl.style.outline = 'none';
       textEl.focus();
+      attachPlainPaste(textEl);
       scrollCardIntoKeyboardView(card);
 
       // Place cursor at end
@@ -1113,14 +1150,14 @@ function buildCanvasCards(rm) {
         textEl.setAttribute('contenteditable', 'false');
         card._suppressNextClick = true;
         setTimeout(() => { card._suppressNextClick = false; }, 400);
-        const html = textEl.innerHTML;
         const plainText = textEl.textContent.trim() || originalText;
         if (plainText !== originalText) {
           const t = state.tasks.find(t => t.id === taskId);
           if (t) t.text = plainText;
         }
-        const cleaned = html.replace(/<div>/gi, '<br>').replace(/<\/div>/gi, '').replace(/<p>/gi, '<br>').replace(/<\/p>/gi, '').replace(/^<br>/, '').trim();
-        textEl.innerHTML = cleaned || escapeHtml(originalText);
+        // Write back what persistence keeps: plain text. The old innerHTML
+        // round-trip kept pasted markup alive on screen until reload.
+        textEl.textContent = plainText;
         card.setAttribute('aria-label', `${plainText} — click to toggle done`);
         requestAnimationFrame(() => requestAnimationFrame(() => updateStrikePath(card)));
         saveState();
@@ -1450,14 +1487,65 @@ function initCanvasAdd() {
   });
 }
 
+// Keep absolute-pixel card positions inside a canvas that changed size —
+// rotation, a window resize, or restoring on a different screen. Positions
+// rescale proportionally (their quadrant meaning survives; clamp-only would
+// pile everything on the edges) and persist with the new canvas dims.
+function reflowCanvasPositions() {
+  const canvas = document.getElementById('scatter-canvas');
+  if (!canvas) return;
+  const rect = canvas.getBoundingClientRect();
+  if (rect.width <= 0 || rect.height <= 0) return;
+  const from = lastCanvasDims;
+  if (from && Math.abs(from.w - rect.width) <= 1 && Math.abs(from.h - rect.height) <= 1) return;
+  // History snapshots hold old-canvas coordinates — leave the viewer first.
+  if (state.viewingIdx !== null) returnToNow();
+  const source = (from && from.w > 0 && from.h > 0) ? from : { w: rect.width, h: rect.height };
+  state.cardPositions = scaleSharedPositions(state.cardPositions, source, rect.width, rect.height);
+  canvas.querySelectorAll('.canvas-card:not(.ghost-card)').forEach(card => {
+    const p = state.cardPositions[card.dataset.id];
+    if (!p) return;
+    card.style.left = p.x + 'px';
+    card.style.top = p.y + 'px';
+    updateStrikePath(card);
+  });
+  drawQuadrantLines(true);
+  saveState(); // re-measures and persists the new canvas dims
+}
+
+// First free spot for a new card: the canvas center, then rings around it.
+// Every card used to land on the exact same center coordinate — add three
+// tasks, see one.
+function findFreeCanvasSpot(canvasW, canvasH) {
+  const { cardW, cardH, edgePad } = canvasCardMetrics(canvasW);
+  const cx = canvasW / 2 - cardW / 2;
+  const cy = canvasH / 2 - cardH / 2;
+  const clampX = (v) => Math.max(edgePad, Math.min(canvasW - cardW - edgePad, v));
+  const clampY = (v) => Math.max(edgePad, Math.min(canvasH - cardH - edgePad, v));
+  const taken = Object.values(state.cardPositions);
+  const isFree = (x, y) =>
+    taken.every(p => Math.abs(p.x - x) >= cardW * 0.7 || Math.abs(p.y - y) >= cardH * 1.4);
+  if (isFree(cx, cy)) return { x: clampX(cx), y: clampY(cy) };
+  for (const r of [56, 112, 168]) {
+    for (let k = 0; k < 8; k++) {
+      const a = (Math.PI / 4) * k;
+      const x = clampX(cx + Math.round(Math.cos(a) * r * 1.6));
+      const y = clampY(cy + Math.round(Math.sin(a) * r));
+      if (isFree(x, y)) return { x, y };
+    }
+  }
+  // Everywhere near the middle is taken — nudge off-center so at least
+  // this one card isn't stacked exactly on another.
+  return { x: clampX(cx + 24), y: clampY(cy + 24) };
+}
+
 function addTaskToCanvas(text) {
   const task = { id: makeId(), text };
   state.tasks.push(task);
 
   const canvas = document.getElementById('scatter-canvas');
   const canvasRect = canvas.getBoundingClientRect();
-  const x = canvasRect.width / 2 - 60;
-  const y = canvasRect.height / 2 - 18;
+  const { x, y } = findFreeCanvasSpot(canvasRect.width, canvasRect.height);
   state.cardPositions[task.id] = { x, y };
 
   state.impactOrder.push(task.id);
@@ -1828,8 +1916,12 @@ if (MAP_URL_ID) activeLsKey = 'todomap-map-' + MAP_URL_ID;
 // Last known scatter-canvas size, persisted alongside positions so the home
 // screen can normalize task coordinates for its card thumbnails.
 let lastCanvasDims = null;
+// Whether this session has written anything yet — the boot-time cloud pull
+// only applies while the board is still untouched.
+let dirtySinceBoot = false;
 
 function saveState() {
+  dirtySinceBoot = true;
   try {
     const serializable = {
       tasks: state.tasks,
@@ -1902,6 +1994,15 @@ function loadSavedState() {
     state.viewingIdx = null;
     sandboxMeta = saved.sandboxMeta || null;
     lastCanvasDims = saved.canvas || null;
+    // Heal saves from before deletions pruned these structures — stale done
+    // ids made "clean up" announce work while fading zero cards.
+    const liveIds = new Set(state.tasks.map(t => t.id));
+    state.impactOrder = state.impactOrder.filter(id => liveIds.has(id));
+    state.effortOrder = state.effortOrder.filter(id => liveIds.has(id));
+    [...state.done].forEach(id => { if (!liveIds.has(id)) state.done.delete(id); });
+    Object.keys(state.cardPositions).forEach(id => {
+      if (!liveIds.has(id)) delete state.cardPositions[id];
+    });
     return saved.phase;
   } catch(e) { return false; }
 }
@@ -1922,6 +2023,17 @@ function doCleanup() {
 
   const canvas = document.getElementById('scatter-canvas');
   const rm = prefersReducedMotion();
+
+  // Cleanup is undoable for one notice-length — capture everything the fade
+  // is about to destroy.
+  const undoData = {
+    tasks: state.tasks.slice(),
+    done: new Set(state.done),
+    impactOrder: state.impactOrder.slice(),
+    effortOrder: state.effortOrder.slice(),
+    cardPositions: { ...state.cardPositions },
+    scatterSig: state.scatterSig,
+  };
 
   // Save snapshot before removing tasks
   const snapshot = {
@@ -1980,12 +2092,32 @@ function doCleanup() {
       state.cardPositions = {};
     }
 
-    // Show empty state if no tasks left
-    const emptyEl = document.getElementById('empty-state');
-    if (emptyEl) emptyEl.classList.toggle('visible', state.tasks.length === 0);
+    updateEmptyState();
 
     saveState();
-    announce(`Cleaned up ${doneIds.length} completed ${doneIds.length === 1 ? 'task' : 'tasks'}.`);
+    showEditorNotice(`cleaned up ${doneIds.length} ${doneIds.length === 1 ? 'task' : 'tasks'}`, {
+      actionLabel: 'undo',
+      duration: 8000,
+      onAction: () => {
+        // Tasks added after the cleanup survive the undo — merge them onto
+        // the restored board instead of clobbering them away.
+        const restored = new Set(undoData.tasks.map(t => t.id));
+        const addedSince = state.tasks.filter(t => !restored.has(t.id));
+        const curPos = state.cardPositions;
+        state.tasks = undoData.tasks.concat(addedSince);
+        state.done = new Set(undoData.done);
+        state.impactOrder = undoData.impactOrder.concat(addedSince.map(t => t.id));
+        state.effortOrder = undoData.effortOrder.concat(addedSince.map(t => t.id));
+        state.cardPositions = { ...undoData.cardPositions };
+        addedSince.forEach(t => { if (curPos[t.id]) state.cardPositions[t.id] = curPos[t.id]; });
+        state.scatterSig = rankingSignature();
+        state.history.pop(); // drop the snapshot this cleanup just pushed
+        hSelected = hNowIdx();
+        buildHistoryTimeline();
+        rerenderFromState();
+        saveState();
+      },
+    });
   };
 
   if (rm) {
@@ -2042,6 +2174,13 @@ function exportGrid() {
   announce('Grid exported.');
 }
 
+// The scatter canvas's "all clear" message — kept in sync by every path
+// that can land on an empty (or no-longer-empty) board, not just cleanup.
+function updateEmptyState() {
+  const emptyEl = document.getElementById('empty-state');
+  if (emptyEl) emptyEl.classList.toggle('visible', state.phase === 'scatter' && state.tasks.length === 0);
+}
+
 // Rebuild the visible phase from state — shared by import, cleanup undo, and
 // cloud pull. Assumes state (tasks/orders/positions/phase) is already set.
 function rerenderFromState() {
@@ -2059,6 +2198,7 @@ function rerenderFromState() {
           state.cardPositions = computeCanvasPositions(rect.width, rect.height);
           state.scatterSig = rankingSignature();
         }
+        reflowCanvasPositions();
         buildCanvasCards(prefersReducedMotion());
         canvas.querySelectorAll('.canvas-card').forEach(c => { c.style.opacity = '1'; });
         drawQuadrantLines(prefersReducedMotion());
@@ -2080,6 +2220,7 @@ function rerenderFromState() {
     }
     showPhase('dump');
   }
+  updateEmptyState();
 }
 
 // Accept only things shaped like our own exports, and only the fields we
@@ -3075,6 +3216,13 @@ function selectSnapshot(snapshotIdx) {
   snap.items.forEach(item => { snapMap[item.id] = item; });
   const liveIds  = new Set(state.tasks.map(t => t.id));
 
+  // Snapshots hold coordinates from the canvas size they were taken on —
+  // clamp them into today's canvas so old history stays visible.
+  const snapRect = canvas.getBoundingClientRect();
+  const snapMetrics = canvasCardMetrics(snapRect.width);
+  const clampSnapX = (v) => Math.max(8, Math.min(snapRect.width - snapMetrics.cardW - 8, v));
+  const clampSnapY = (v) => Math.max(8, Math.min(snapRect.height - snapMetrics.cardH - 8, v));
+
   // Animate live cards into historical positions (or fade out if absent)
   canvas.querySelectorAll('.canvas-card:not(.ghost-card)').forEach(card => {
     const id   = card.dataset.id;
@@ -3083,8 +3231,8 @@ function selectSnapshot(snapshotIdx) {
     if (item) {
       card.style.transition = rm ? 'none'
         : 'left 400ms cubic-bezier(0.25,0.1,0.25,1), top 400ms cubic-bezier(0.25,0.1,0.25,1), opacity 250ms ease';
-      card.style.left    = item.x + 'px';
-      card.style.top     = item.y + 'px';
+      card.style.left    = clampSnapX(item.x) + 'px';
+      card.style.top     = clampSnapY(item.y) + 'px';
       card.style.opacity = '1';
       card.classList.toggle('done', item.done);
     } else {
@@ -3098,8 +3246,8 @@ function selectSnapshot(snapshotIdx) {
     if (!liveIds.has(item.id)) {
       const ghost = document.createElement('div');
       ghost.className = 'canvas-card ghost-card' + (item.done ? ' done' : '');
-      ghost.style.left   = item.x + 'px';
-      ghost.style.top    = item.y + 'px';
+      ghost.style.left   = clampSnapX(item.x) + 'px';
+      ghost.style.top    = clampSnapY(item.y) + 'px';
       ghost.style.opacity = '0';
       ghost.innerHTML = `<span class="card-text">${escapeHtml(item.text)}</span>`;
       canvas.appendChild(ghost);
@@ -3286,10 +3434,13 @@ async function bootSharedView(mapId) {
       if (Object.keys(state.cardPositions).length === 0) {
         state.cardPositions = computeCanvasPositions(rect.width, rect.height);
       }
+      // A returning sandbox may have been laid out on a different window size
+      reflowCanvasPositions();
       buildCanvasCards(prefersReducedMotion());
       canvas.querySelectorAll('.canvas-card').forEach(c => { c.style.opacity = '1'; });
       drawQuadrantLines(prefersReducedMotion());
       buildHistoryTimeline();
+      updateEmptyState();
       announce('Viewing a shared map. This is your own editable copy.');
     });
   }
@@ -3462,10 +3613,14 @@ function init() {
             state.cardPositions = computeCanvasPositions(canvasRect.width, canvasRect.height);
             state.scatterSig = rankingSignature();
           }
+          // The window (or device orientation) may have changed since the
+          // last visit — pull stranded cards back inside before rendering.
+          reflowCanvasPositions();
           buildCanvasCards(prefersReducedMotion());
           canvas.querySelectorAll('.canvas-card').forEach(c => { c.style.opacity = '1'; });
           drawQuadrantLines(prefersReducedMotion());
           buildHistoryTimeline();
+          updateEmptyState();
           announce('Restored previous session. Click any task to mark it done.');
         }
       });
@@ -3502,6 +3657,23 @@ function init() {
     navigator.storage.persist();
   }
 
+  // One safe pull on boot: adopt the server copy only when it is strictly
+  // newer AND nothing has been edited here yet this session. A user already
+  // typing keeps today's behavior — their edits win by last-write.
+  if (window.TodoMapsCloud && TodoMapsCloud.enabled && window.TodoMapsIndex) {
+    TodoMapsCloud.pullMap(MAP_URL_ID).then((row) => {
+      if (!row || dirtySinceBoot) return;
+      const local = TodoMapsIndex.get(MAP_URL_ID);
+      if (!local || row.map_kind !== local.kind) return;
+      const serverMs = Date.parse(row.updated_at) || 0;
+      if (serverMs <= (local.updatedAt || 0) + 2000) return; // same skew window as sync
+      if (!TodoMapsIndex.writeData(MAP_URL_ID, row.data)) return;
+      TodoMapsIndex.adopt({ ...local, name: row.name, updatedAt: serverMs }, undefined);
+      loadSavedState();
+      rerenderFromState();
+    }).catch(() => { /* sync failures are the status line's job, not boot's */ });
+  }
+
   // Another tab can re-home this map (a sign-in ownership conflict) or
   // delete it. Follow the forwarding note when there is one; otherwise show
   // the not-found screen instead of letting edits pile into an unreachable
@@ -3524,6 +3696,20 @@ function init() {
 }
 
 init();
+
+// Reflow the scatter canvas when the window changes size — registered at
+// module level so shared views (which skip init's owner setup) get it too.
+// The on-screen keyboard also resizes the viewport on Android; keyboard-open
+// and a focused editable both skip the reflow.
+let canvasReflowTimer = null;
+window.addEventListener('resize', () => {
+  if (state.phase !== 'scatter') return;
+  if (document.body.classList.contains('keyboard-open')) return;
+  const ae = document.activeElement;
+  if (ae && (ae.isContentEditable || ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA')) return;
+  clearTimeout(canvasReflowTimer);
+  canvasReflowTimer = setTimeout(reflowCanvasPositions, 250);
+});
 
 // Ensure typewriter starts on fresh load after everything is initialized
 document.fonts.ready.then(() => {

@@ -1388,11 +1388,16 @@ button:focus-visible {
     pointer-events: none;
     transition: opacity 150ms ease;
   }
+  /* visibility, not opacity: opacity composites the whole subtree, which
+     used to hide the add-task input (a child) while the user typed into it.
+     visibility lets the open input wrap override with visible. */
   .keyboard-open .canvas-toolbar {
-    opacity: 0 !important;
+    visibility: hidden;
     pointer-events: none !important;
   }
-  .keyboard-open .canvas-add-input-wrap {
+  .keyboard-open .canvas-add-input-wrap.visible {
+    visibility: visible;
+    pointer-events: auto;
     bottom: auto;
     top: 40%;
   }

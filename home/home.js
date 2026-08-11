@@ -229,7 +229,17 @@
     return card;
   }
 
+  // A render that lands mid-rename would rebuild the input from the stored
+  // name and eat what the user typed — defer it; the input's blur handler
+  // renders anyway.
+  let pendingRender = false;
+
   function render() {
+    if (renamingId !== null) {
+      const input = grid.querySelector('.map-rename-input');
+      if (input && document.activeElement === input) { pendingRender = true; return; }
+    }
+    pendingRender = false;
     const entries = Maps.list().slice().sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
 
     grid.textContent = '';
@@ -546,6 +556,21 @@
   // Any outside click closes an open ⋯ menu
   document.addEventListener('click', () => {
     if (openMenuId !== null) { openMenuId = null; render(); }
+  });
+
+  // Freshness: a bfcache Back restores this page exactly as it was — counts
+  // and thumbnails included — so re-render from storage. The storage listener
+  // keeps edits made in other tabs visible without a reload.
+  window.addEventListener('pageshow', (e) => {
+    if (e.persisted) { render(); refreshAuthLink(); refreshSyncStatus(); }
+  });
+  let storageRenderTimer = null;
+  window.addEventListener('storage', (e) => {
+    const relevant = !e.key || e.key === 'todoMapsIndex.v1' ||
+      e.key.indexOf('todomap-map-') === 0 || e.key === 'todomap-auth.v1';
+    if (!relevant) return;
+    clearTimeout(storageRenderTimer);
+    storageRenderTimer = setTimeout(() => { render(); refreshAuthLink(); }, 150);
   });
 
   // ── Boot ────────────────────────────────────────────────────────────────────

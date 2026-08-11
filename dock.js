@@ -15,7 +15,8 @@
 (function () {
   'use strict';
 
-  if (!/(?:\?|&)map=/.test(location.search)) return; // share views / bare visits: no dock
+  if (!/[?&]map=[^&]/.test(location.search)) return; // share views / bare visits: no dock
+  if (/^#m=/.test(location.hash)) return; // a share hash beats a stray ?map= — stay clean
   var Maps = window.TodoMapsIndex;
   if (!Maps) return;
 
@@ -54,8 +55,9 @@
     '.dock-home span { border-radius: 50%; background: rgba(82,99,71,0.35); }',
     '.dock-home span:first-child { background: #526347; }',
     '.dock-divider { width: 24px; height: 1px; background: rgba(82,99,71,0.15); flex-shrink: 0; }',
-    '.dock-tiles { display: flex; flex-direction: column; gap: 12px; overflow-y: auto; scrollbar-width: none; }',
-    '.dock-tiles::-webkit-scrollbar { display: none; }',
+    '.dock-tiles { display: flex; flex-direction: column; gap: 12px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: rgba(82,99,71,0.25) transparent; }',
+    '.dock-tiles::-webkit-scrollbar { width: 4px; }',
+    '.dock-tiles::-webkit-scrollbar-thumb { background: rgba(82,99,71,0.25); border-radius: 2px; }',
     '.dock-tile { position: relative; width: 40px; height: 40px; border-radius: 8px; background: #ffffff; flex-shrink: 0;',
     '  box-shadow: 0 1px 4px rgba(46,52,45,0.05); opacity: 0.75; display: block; transition: box-shadow 150ms, opacity 150ms; }',
     '.dock-tile:hover { opacity: 1; }',
@@ -68,7 +70,8 @@
     '  display: grid; place-items: center; color: rgba(82,99,71,0.55); font-size: 16px; font-weight: 300; cursor: pointer; margin-top: auto; flex-shrink: 0; }',
     '.dock-new:hover { border-color: rgba(82,99,71,0.55); color: #526347; }',
     '#map-dock-tip { position: fixed; z-index: 410; background: #ffffff; border-radius: 999px; box-shadow: 0 8px 24px rgba(46,52,45,0.16);',
-    '  padding: 5px 12px; font-family: var(--font-body, sans-serif); font-size: 12px; white-space: nowrap; color: #2e342d; pointer-events: none; display: none; }',
+    '  padding: 5px 12px; font-family: var(--font-body, sans-serif); font-size: 12px; white-space: nowrap; color: #2e342d; pointer-events: none; display: none;',
+    '  max-width: min(320px, calc(100vw - 100px)); overflow: hidden; text-overflow: ellipsis; }',
     '#map-dock-tip .dt-count { color: rgba(46,52,45,0.3); }',
     '#map-dock-chip { display: none; position: fixed; top: 12px; left: 12px; z-index: 400; background: #ffffff; border: none;',
     '  border-radius: 999px; box-shadow: 0 2px 8px rgba(46,52,45,0.12); padding: 8px 14px;',
@@ -76,7 +79,8 @@
     '  max-width: 60vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }',
     '#map-dock-chip .chip-caret { color: rgba(82,99,71,0.55); font-size: 10px; margin-left: 6px; }',
     '#map-dock-sheet { display: none; position: fixed; top: 52px; left: 12px; z-index: 401; width: min(260px, calc(100vw - 24px));',
-    '  background: #ffffff; border-radius: 12px; box-shadow: 0 8px 24px rgba(46,52,45,0.16); padding: 6px; flex-direction: column; }',
+    '  background: #ffffff; border-radius: 12px; box-shadow: 0 8px 24px rgba(46,52,45,0.16); padding: 6px; flex-direction: column;',
+    '  max-height: calc(100vh - 76px); overflow-y: auto; }',
     '#map-dock-sheet.open { display: flex; }',
     '.dock-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px; border-radius: 8px;',
     '  border: none; background: none; font-family: var(--font-body, sans-serif); font-size: 13px; color: #2e342d; cursor: pointer; text-align: left; text-decoration: none; }',
@@ -87,6 +91,11 @@
     '@media (pointer: coarse) {',
     '  #map-dock, #map-dock-hotzone, #map-dock-edge, #map-dock-tip { display: none; }',
     '  #map-dock-chip { display: block; }',
+    '}',
+    // Narrow desktop windows move the editor's quadrant labels to left: 8px —
+    // a full 15px hotzone would sit invisibly on top of their click targets.
+    '@media (max-width: 600px) {',
+    '  #map-dock-hotzone { width: 6px; }',
     '}',
   ].join('\n');
 
@@ -197,6 +206,10 @@
       tip.style.display = 'block';
     });
     a.addEventListener('mouseleave', function () { tip.style.display = 'none'; });
+    a.addEventListener('click', function (e) {
+      // Already here — a full reload of the same board helps nobody.
+      if (entry.id === currentId) { e.preventDefault(); close(); }
+    });
     tiles.appendChild(a);
   });
   dock.appendChild(tiles);
@@ -252,6 +265,10 @@
     count.className = 'dr-count';
     count.textContent = countLabel(Maps.readData(entry.id));
     row.appendChild(name); row.appendChild(count);
+    row.addEventListener('click', function (e) {
+      // Already here — a full reload of the same board helps nobody.
+      if (entry.id === currentId) { e.preventDefault(); sheet.classList.remove('open'); }
+    });
     sheet.appendChild(row);
   });
   var sheetDivider = document.createElement('div');

@@ -224,6 +224,12 @@
   }
 
   const listServerMaps = () => rest('GET', 'maps?select=id,name,map_kind,data,created_at,updated_at');
+  // One map's server row — the editors pull their own map once on boot.
+  async function pullMap(id) {
+    if (!enabled || !UUID_RE.test(id)) return null;
+    const rows = await rest('GET', 'maps?id=eq.' + id + '&select=id,name,map_kind,data,created_at,updated_at');
+    return rows && rows[0] ? rows[0] : null;
+  }
   const deleteServerMap = (id) => rest('DELETE', 'maps?id=eq.' + id);
   const upsertServerMap = (row) =>
     rest('POST', 'maps?on_conflict=id', row, 'resolution=merge-duplicates,return=minimal');
@@ -514,6 +520,7 @@
     syncNow,
     schedulePush,
     pushMap,
+    pullMap,
     pushDelete,
     undeleteMap,
     queueShareRevoke,
