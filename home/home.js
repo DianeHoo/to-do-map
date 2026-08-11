@@ -408,6 +408,8 @@
   const authSend = document.getElementById('auth-send');
   const authStatus = document.getElementById('auth-status');
   const authUserEmail = document.getElementById('auth-user-email');
+  const authSent = document.getElementById('auth-sent');
+  const authSentEmail = document.getElementById('auth-sent-email');
 
   function refreshAuthLink() {
     if (!cloud) return; // stays hidden — no account system without sync
@@ -421,6 +423,7 @@
     const signedIn = !!(user && user.email);
     authSignedOut.hidden = signedIn;
     authSignedIn.hidden = !signedIn;
+    authSent.hidden = true;
     if (signedIn) {
       authUserEmail.textContent = user.email;
     } else {
@@ -444,7 +447,10 @@
     authStatus.hidden = false;
     try {
       await cloud.signInWithEmail(email);
-      authStatus.textContent = 'magic link sent — check your inbox.';
+      authStatus.hidden = true;
+      authSignedOut.hidden = true;
+      authSentEmail.textContent = 'we sent a link to ' + email;
+      authSent.hidden = false;
     } catch (err) {
       authSend.disabled = false;
       authStatus.textContent = 'couldn’t send: ' + err.message;
@@ -455,6 +461,18 @@
     authLink.addEventListener('click', openAuthModal);
     authSend.addEventListener('click', sendMagicLink);
     authEmail.addEventListener('keydown', (e) => { if (e.key === 'Enter') sendMagicLink(); });
+    document.getElementById('auth-resend').addEventListener('click', async () => {
+      try {
+        await cloud.signInWithEmail(authEmail.value.trim());
+        announce('link sent again');
+      } catch (err) { /* keep the sent panel; a resend failure is silent */ }
+    });
+    document.getElementById('auth-change-email').addEventListener('click', () => {
+      authSent.hidden = true;
+      authSignedOut.hidden = false;
+      authSend.disabled = false;
+      requestAnimationFrame(() => authEmail.focus());
+    });
     document.getElementById('auth-signout').addEventListener('click', () => {
       cloud.signOut();
       closeAuthModal();

@@ -422,6 +422,24 @@ button { font: inherit; color: inherit; }
   transition: color 150ms;
 }
 .auth-textbtn:hover { color: var(--text); }
+.auth-dot {
+  display: block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--sage);
+  opacity: 0.75;
+  margin-bottom: 10px;
+}
+.auth-substat {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.auth-links { margin-top: 16px; }
+.auth-textbtn.auth-inline { margin-top: 0; font-size: 11px; color: var(--sage-interactive); }
+.auth-textbtn.auth-inline:hover { color: var(--sage); }
+.auth-sep { color: var(--text-ghost); margin: 0 8px; font-size: 11px; }
 
 /* ── Toast ── */
 .toast {
@@ -490,15 +508,20 @@ button { font: inherit; color: inherit; }
 <div id="auth-modal" class="kind-picker-overlay" hidden>
   <div class="auth-panel" role="dialog" aria-label="Account">
     <div id="auth-signedout">
-      <p class="auth-title">sync across devices</p>
-      <p class="auth-note">enter your email and we’ll send a magic link — your maps follow you to any browser you sign in on.</p>
+      <p class="auth-title">sync your maps across devices</p>
       <input id="auth-email" class="auth-input" type="email" autocomplete="email" placeholder="you@example.com" aria-label="email address">
-      <button id="auth-send" class="new-map-btn" type="button">send magic link</button>
+      <button id="auth-send" class="new-map-btn" type="button">send link</button>
       <p id="auth-status" class="auth-note auth-status" hidden></p>
+    </div>
+    <div id="auth-sent" hidden>
+      <span class="auth-dot" aria-hidden="true"></span>
+      <p class="auth-title">check your inbox</p>
+      <p class="auth-note" id="auth-sent-email"></p>
+      <p class="auth-links"><button id="auth-resend" class="auth-textbtn auth-inline" type="button">resend</button><span class="auth-sep" aria-hidden="true">·</span><button id="auth-change-email" class="auth-textbtn auth-inline" type="button">use a different email</button></p>
     </div>
     <div id="auth-signedin" hidden>
       <p class="auth-title" id="auth-user-email"></p>
-      <p class="auth-note">your maps sync to this account. signing out keeps them in this browser.</p>
+      <p class="auth-substat">maps sync to this account</p>
       <button id="auth-signout" class="auth-textbtn" type="button">sign out</button>
     </div>
   </div>

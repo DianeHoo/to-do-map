@@ -1534,6 +1534,13 @@ button:focus-visible {
   .sort-list { gap: 4px; }
   .toolbar-label { display: none; }
 }
+/* On touch devices the map dock's title chip (dock.js) sits top-left; shift
+   the top-left quadrant label stack down out from under it. */
+@media (pointer: coarse) {
+  body.has-map-dock .corner-label.soon,
+  body.has-map-dock .corner-hint.soon,
+  body.has-map-dock .interaction-hints { transform: translateY(40px); }
+}
 </style>
 </head>
 <body>
@@ -1742,5 +1749,6 @@ Start by adding what's on your mind.</p>
 <script src="../maps-index.js"></script>
 <script src="../maps-cloud.js"></script>
 <script src="app.js"></script>
+<script src="../dock.js"></script>
 </body>
 </html>
