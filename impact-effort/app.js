@@ -108,16 +108,22 @@ function showPhase(targetPhase) {
     const el = document.getElementById(PHASE_IDS[phase]);
     el.classList.remove('phase-pending', 'phase-active', 'phase-completed');
 
+    // Hidden phases are only faded out visually — inert removes their whole
+    // subtree from the tab order and assistive tech (aria-hidden alone still
+    // left every control tabbable).
     if (idx < targetIdx) {
       el.classList.add('phase-completed'); // slides up and out
       el.setAttribute('aria-hidden', 'true');
+      el.inert = true;
     } else if (idx === targetIdx) {
       el.classList.add('phase-active'); // slides into view
       el.scrollTop = 0;
       el.removeAttribute('aria-hidden');
+      el.inert = false;
     } else {
       el.classList.add('phase-pending'); // stays below
       el.setAttribute('aria-hidden', 'true');
+      el.inert = true;
     }
   });
 
@@ -127,6 +133,16 @@ function showPhase(targetPhase) {
   if (toolbar) toolbar.classList.toggle('visible', targetPhase === 'scatter');
   const utilWrap = document.getElementById('canvas-util-wrap');
   if (utilWrap) utilWrap.classList.toggle('visible', targetPhase === 'scatter');
+
+  // Focus follows the transition — otherwise it stays stranded on a control
+  // inside the phase that just went inert.
+  const activeEl = document.getElementById(PHASE_IDS[targetPhase]);
+  if (activeEl && !activeEl.contains(document.activeElement)) {
+    activeEl.setAttribute('tabindex', '-1');
+    activeEl.focus({ preventScroll: true });
+  }
+
+  syncTipRotation();
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -206,7 +222,7 @@ function initDump() {
       btnSuggest.style.opacity = '0';
       btnSuggest.style.pointerEvents = 'none';
       saveState();
-      announce('8 tasks added. Drag to reorder or add your own.');
+      announce(`${SAMPLE_TASKS.length} sample tasks added. Drag to reorder or add your own.`);
     });
   }
 
@@ -238,6 +254,7 @@ function addTask(text, animate) {
   if (suggestBtn && state.tasks.length > 0) {
     suggestBtn.style.opacity = '0';
     suggestBtn.style.pointerEvents = 'none';
+    suggestBtn.style.visibility = 'hidden'; // out of the tab order, not just invisible
   }
   card.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   updateDumpOverflow();
@@ -290,7 +307,7 @@ function deleteDumpTask(id) {
   // Re-show suggest button and restart typewriter when all tasks deleted
   if (state.tasks.length === 0) {
     const suggestBtn = document.getElementById('btn-suggest-tasks');
-    if (suggestBtn) { suggestBtn.style.opacity = ''; suggestBtn.style.pointerEvents = ''; }
+    if (suggestBtn) { suggestBtn.style.opacity = ''; suggestBtn.style.pointerEvents = ''; suggestBtn.style.visibility = ''; }
     startTypewriter();
   }
   updateSortButton();
@@ -310,11 +327,11 @@ function renderDumpCards() {
   const suggestBtn = document.getElementById('btn-suggest-tasks');
   const inputWrap = document.querySelector('.dump-input-wrap');
   if (state.tasks.length > 0) {
-    if (suggestBtn) { suggestBtn.style.opacity = '0'; suggestBtn.style.pointerEvents = 'none'; }
+    if (suggestBtn) { suggestBtn.style.opacity = '0'; suggestBtn.style.pointerEvents = 'none'; suggestBtn.style.visibility = 'hidden'; }
     if (inputWrap) inputWrap.classList.add('has-value');
     stopTypewriter();
   } else {
-    if (suggestBtn) { suggestBtn.style.opacity = ''; suggestBtn.style.pointerEvents = ''; }
+    if (suggestBtn) { suggestBtn.style.opacity = ''; suggestBtn.style.pointerEvents = ''; suggestBtn.style.visibility = ''; }
     if (inputWrap) inputWrap.classList.remove('has-value');
   }
 }
@@ -354,7 +371,7 @@ function showDumpFresh() {
   const inputWrap = document.querySelector('.dump-input-wrap');
   if (inputWrap) { inputWrap.classList.remove('has-value'); inputWrap.classList.remove('has-input-text'); }
   const suggestBtn = document.getElementById('btn-suggest-tasks');
-  if (suggestBtn) { suggestBtn.style.opacity = '0'; suggestBtn.style.pointerEvents = 'none'; }
+  if (suggestBtn) { suggestBtn.style.opacity = '0'; suggestBtn.style.pointerEvents = 'none'; suggestBtn.style.visibility = 'hidden'; }
   document.getElementById('dump-input').value = '';
   startTypewriter();
 }
@@ -2388,9 +2405,20 @@ function stopTipRotation() {
   effortTipTimer = null;
 }
 
+// Rotation follows the visible phase (showPhase drives this) — both lists
+// used to rotate forever from init, even while hidden, which kept two live
+// regions chattering at screen readers every few seconds.
+function syncTipRotation() {
+  stopTipRotation();
+  if (state.phase === 'sort-impact') {
+    startTipRotation('sort-tip-impact', IMPACT_TIPS, 'impact');
+  } else if (state.phase === 'sort-effort') {
+    startTipRotation('sort-tip-effort', EFFORT_TIPS, 'effort');
+  }
+}
+
 function initSortTips() {
-  startTipRotation('sort-tip-impact', IMPACT_TIPS, 'impact');
-  startTipRotation('sort-tip-effort', EFFORT_TIPS, 'effort');
+  syncTipRotation();
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -2401,23 +2429,34 @@ function initCornerPopovers() {
   const labels = document.querySelectorAll('.corner-label');
   const popovers = document.querySelectorAll('.corner-popover');
 
+  // aria-hidden and aria-expanded track the open state — the markup ships
+  // them hardcoded closed, which told screen readers the text never exists.
+  const closeAll = () => {
+    popovers.forEach(p => { p.classList.remove('open'); p.setAttribute('aria-hidden', 'true'); });
+    labels.forEach(l => l.setAttribute('aria-expanded', 'false'));
+  };
+
   labels.forEach(label => {
+    label.setAttribute('aria-expanded', 'false');
     label.addEventListener('click', (e) => {
       e.stopPropagation();
       // Find the matching popover (next sibling)
       const popover = label.nextElementSibling;
       if (!popover || !popover.classList.contains('corner-popover')) return;
       const isOpen = popover.classList.contains('open');
-      // Close all popovers first
-      popovers.forEach(p => p.classList.remove('open'));
-      // Toggle the clicked one
-      if (!isOpen) popover.classList.add('open');
+      closeAll();
+      if (!isOpen) {
+        popover.classList.add('open');
+        popover.setAttribute('aria-hidden', 'false');
+        label.setAttribute('aria-expanded', 'true');
+      }
     });
   });
 
-  // Click outside dismisses all popovers
-  document.addEventListener('click', () => {
-    popovers.forEach(p => p.classList.remove('open'));
+  // Click outside or Escape dismisses all popovers
+  document.addEventListener('click', closeAll);
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeAll();
   });
 }
 
@@ -2467,6 +2506,13 @@ function initMapGuide() {
       toggle.focus();
     });
   }
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && content.classList.contains('open')) {
+      content.classList.remove('open');
+      toggle.setAttribute('aria-expanded', 'false');
+      toggle.focus();
+    }
+  });
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

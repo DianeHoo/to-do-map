@@ -133,11 +133,18 @@ button { font: inherit; color: inherit; }
 .map-thumb {
   cursor: pointer;
   position: relative;
+  display: block;
   height: 110px;
   margin: 10px 10px 0;
   border-radius: 8px;
   background: var(--canvas-bg);
   overflow: hidden;
+}
+.map-thumb:focus-visible,
+.map-title:focus-visible {
+  outline: 2px solid var(--sage);
+  outline-offset: 2px;
+  border-radius: 4px;
 }
 .map-thumb .axis-v {
   position: absolute;
@@ -194,6 +201,7 @@ button { font: inherit; color: inherit; }
   cursor: pointer;
   line-height: 1.4;
   overflow-wrap: break-word;
+  text-decoration: none; /* it's a link now — keep the card look */
 }
 .map-rename-input {
   flex: 1;
@@ -510,7 +518,7 @@ button { font: inherit; color: inherit; }
 </main>
 
 <div id="kind-picker" class="kind-picker-overlay" hidden>
-  <div class="kind-picker-panel" role="dialog" aria-label="Create a new map">
+  <div class="kind-picker-panel" role="dialog" aria-modal="true" aria-label="Create a new map">
     <button class="kind-option" type="button" data-kind="urgency-importance">
       <svg width="44" height="44" viewBox="0 0 44 44" aria-hidden="true"><line x1="22" y1="6" x2="22" y2="38" stroke="rgba(82,99,71,0.35)" stroke-width="1.5"></line><line x1="6" y1="22" x2="38" y2="22" stroke="rgba(82,99,71,0.35)" stroke-width="1.5"></line><rect x="26" y="9" width="9" height="5" rx="2" fill="#526347"></rect><rect x="9" y="12" width="9" height="5" rx="2" fill="rgba(82,99,71,0.45)"></rect><rect x="27" y="28" width="9" height="5" rx="2" fill="rgba(82,99,71,0.45)"></rect></svg>
       <span>urgency × importance</span>
@@ -527,7 +535,7 @@ button { font: inherit; color: inherit; }
 </div>
 
 <div id="auth-modal" class="kind-picker-overlay" hidden>
-  <div class="auth-panel" role="dialog" aria-label="Account">
+  <div class="auth-panel" role="dialog" aria-modal="true" aria-label="Account">
     <div id="auth-signedout">
       <p class="auth-title">sync your maps across devices</p>
       <input id="auth-email" class="auth-input" type="email" autocomplete="email" placeholder="you@example.com" aria-label="email address">

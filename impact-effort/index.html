@@ -1239,6 +1239,13 @@ button:focus-visible {
   outline-offset: 3px;
   border-radius: 4px;
 }
+/* Sort cards are keyboard-reorderable (↑/↓) — they need a visible ring too */
+.sort-card:focus-visible {
+  outline: 2px solid var(--sage);
+  outline-offset: 3px;
+}
+/* Phase sections receive programmatic focus on transition — no ring there */
+.phase:focus { outline: none; }
 
 /* (dump-intro removed — replaced by dump-title + dump-tagline) */
 
@@ -1647,7 +1654,7 @@ Biggest payoff at the top.</h2>
         role="list"
         aria-label="Tasks to sort by impact. Drag to reorder."
       ></div>
-      <div class="sort-tip" id="sort-tip-impact" aria-live="polite">
+      <div class="sort-tip" id="sort-tip-impact">
         <span class="sort-tip-text"></span>
       </div>
     </div>
@@ -1671,7 +1678,7 @@ Hardest and most time-consuming at the top.</h2>
         role="list"
         aria-label="Tasks to sort by effort. Drag to reorder."
       ></div>
-      <div class="sort-tip" id="sort-tip-effort" aria-live="polite">
+      <div class="sort-tip" id="sort-tip-effort">
         <span class="sort-tip-text"></span>
       </div>
     </div>

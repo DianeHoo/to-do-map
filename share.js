@@ -181,11 +181,26 @@
     const status = el('div', 'share-status');
     status.setAttribute('aria-live', 'polite');
 
+    const opener = document.activeElement;
     function close() {
       backdrop.remove();
       document.removeEventListener('keydown', onKey);
+      if (opener && opener.focus) opener.focus();
     }
-    function onKey(e) { if (e.key === 'Escape') close(); }
+    function onKey(e) {
+      if (e.key === 'Escape') { close(); return; }
+      // Keep Tab inside the dialog while it's up
+      if (e.key === 'Tab') {
+        const list = [...dialog.querySelectorAll('button, input, [href]')]
+          .filter((n) => !n.disabled && n.offsetParent !== null);
+        if (!list.length) return;
+        const first = list[0];
+        const last = list[list.length - 1];
+        if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+        else if (!dialog.contains(document.activeElement)) { e.preventDefault(); first.focus(); }
+      }
+    }
     document.addEventListener('keydown', onKey);
     backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(); });
 

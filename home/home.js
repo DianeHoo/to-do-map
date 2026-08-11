@@ -144,14 +144,20 @@
     const doneSet = new Set((data && data.done) || []);
     const doneCount = tasks.filter(t => doneSet.has(t.id)).length;
 
-    // Thumbnail
-    const thumb = el('div', 'map-thumb');
+    // Thumbnail — a real link, so keyboard and middle-click work natively
+    const thumb = el('a', 'map-thumb');
+    thumb.href = editorHref(entry);
+    thumb.setAttribute('aria-label', 'open ' + entry.name);
     thumb.appendChild(el('div', 'axis-v'));
     thumb.appendChild(el('div', 'axis-h'));
     thumb.appendChild(buildThumbDots(entry, data));
     const tag = el('span', 'map-kind-tag', KIND_LABELS[entry.kind] || entry.kind);
     thumb.appendChild(tag);
-    thumb.addEventListener('click', () => openMap(entry));
+    thumb.addEventListener('click', (e) => {
+      if (e.metaKey || e.ctrlKey || e.shiftKey) return; // let new-tab clicks be
+      e.preventDefault();
+      openMap(entry);
+    });
     card.appendChild(thumb);
 
     // Title row
@@ -176,10 +182,13 @@
       // Focus after it's in the DOM
       requestAnimationFrame(() => { input.focus(); input.select(); });
     } else {
-      const title = el('div', 'map-title', entry.name);
+      const title = el('a', 'map-title', entry.name);
+      title.href = editorHref(entry);
       title.title = 'double-click to rename';
       let openTimer = null;
       title.addEventListener('click', (e) => {
+        if (e.metaKey || e.ctrlKey || e.shiftKey) return; // let new-tab clicks be
+        e.preventDefault();
         // Debounce so double-click (rename) doesn't also open
         clearTimeout(openTimer);
         if (e.detail > 1) return;
@@ -198,6 +207,7 @@
     menuBtn.type = 'button';
     menuBtn.setAttribute('aria-label', 'actions for ' + entry.name);
     menuBtn.setAttribute('aria-haspopup', 'menu');
+    menuBtn.setAttribute('aria-expanded', String(openMenuId === entry.id));
     menuBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       openMenuId = openMenuId === entry.id ? null : entry.id;
@@ -211,6 +221,20 @@
       const menu = el('div', 'map-menu');
       menu.setAttribute('role', 'menu');
       menu.addEventListener('click', (e) => e.stopPropagation());
+      menu.addEventListener('keydown', (e) => {
+        const items = [...menu.querySelectorAll('[role="menuitem"]')];
+        const idx = items.indexOf(document.activeElement);
+        if (e.key === 'Escape') {
+          e.stopPropagation();
+          openMenuId = null;
+          render();
+          const btn = grid.querySelector('.map-card[data-id="' + entry.id + '"] .map-menu-btn');
+          if (btn) btn.focus();
+        } else if (e.key === 'ArrowDown') { e.preventDefault(); (items[idx + 1] || items[0]).focus(); }
+        else if (e.key === 'ArrowUp') { e.preventDefault(); (items[idx - 1] || items[items.length - 1]).focus(); }
+        else if (e.key === 'Home') { e.preventDefault(); items[0].focus(); }
+        else if (e.key === 'End') { e.preventDefault(); items[items.length - 1].focus(); }
+      });
 
       const item = (label, className, fn) => {
         const b = el('button', className, label);
@@ -224,6 +248,11 @@
       item('share', '', () => { render(); shareMap(entry); });
       item('delete', 'menu-delete', () => deleteMap(entry));
       card.appendChild(menu);
+      // Menu just opened via the ⋯ button — move focus to its first action
+      requestAnimationFrame(() => {
+        const first = menu.querySelector('[role="menuitem"]');
+        if (first && card.contains(menu)) first.focus();
+      });
     }
 
     return card;
@@ -368,8 +397,37 @@
 
   // ── New-map picker ──────────────────────────────────────────────────────────
 
-  function openKindPicker() { kindPicker.hidden = false; }
-  function closeKindPicker() { kindPicker.hidden = true; }
+  // Minimal focus trap shared by the two dialogs: Tab cycles inside the
+  // panel, and focus returns to whatever opened it on close.
+  function trapFocus(overlay, panel) {
+    let opener = null;
+    overlay.addEventListener('keydown', (e) => {
+      if (e.key !== 'Tab') return;
+      const list = [...panel.querySelectorAll('button, [href], input, select, textarea')]
+        .filter((el) => !el.hidden && el.offsetParent !== null && !el.disabled);
+      if (!list.length) return;
+      const first = list[0];
+      const last = list[list.length - 1];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    });
+    return {
+      opened() { opener = document.activeElement; },
+      closed() { if (opener && opener.focus) opener.focus(); opener = null; },
+    };
+  }
+
+  const kindTrap = trapFocus(kindPicker, kindPicker.querySelector('.kind-picker-panel'));
+
+  function openKindPicker() {
+    kindTrap.opened();
+    kindPicker.hidden = false;
+    requestAnimationFrame(() => {
+      const first = kindPicker.querySelector('.kind-option');
+      if (first) first.focus();
+    });
+  }
+  function closeKindPicker() { kindPicker.hidden = true; kindTrap.closed(); }
 
   function createMap(kind) {
     closeKindPicker();
@@ -484,6 +542,8 @@
     syncStatusEl.hidden = !syncStatusEl.firstChild;
   }
 
+  const authTrap = trapFocus(authModal, authModal.querySelector('.auth-panel'));
+
   function openAuthModal() {
     const user = cloud.currentUser();
     const signedIn = !!(user && user.email);
@@ -496,10 +556,14 @@
       authStatus.hidden = true;
       authSend.disabled = false;
     }
+    authTrap.opened();
     authModal.hidden = false;
-    if (!signedIn) requestAnimationFrame(() => authEmail.focus());
+    requestAnimationFrame(() => {
+      if (!signedIn) authEmail.focus();
+      else document.getElementById('auth-signout').focus();
+    });
   }
-  function closeAuthModal() { authModal.hidden = true; }
+  function closeAuthModal() { authModal.hidden = true; authTrap.closed(); }
 
   async function sendMagicLink() {
     const email = authEmail.value.trim();
@@ -551,6 +615,7 @@
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && !kindPicker.hidden) closeKindPicker();
     if (e.key === 'Escape' && !authModal.hidden) closeAuthModal();
+    if (e.key === 'Escape' && openMenuId !== null) { openMenuId = null; render(); }
   });
 
   // Any outside click closes an open ⋯ menu
