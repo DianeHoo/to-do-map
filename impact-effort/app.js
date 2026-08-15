@@ -1525,11 +1525,23 @@ function reflowCanvasPositions() {
   if (state.viewingIdx !== null) returnToNow();
   const source = (from && from.w > 0 && from.h > 0) ? from : { w: rect.width, h: rect.height };
   state.cardPositions = scaleSharedPositions(state.cardPositions, source, rect.width, rect.height);
+  const { edgePad } = canvasCardMetrics(rect.width);
   canvas.querySelectorAll('.canvas-card:not(.ghost-card)').forEach(card => {
     const p = state.cardPositions[card.dataset.id];
     if (!p) return;
     card.style.left = p.x + 'px';
     card.style.top = p.y + 'px';
+    // scaleSharedPositions clamps against the *nominal* single-line card
+    // height; long text wrapped onto extra lines can still render taller
+    // than that, pushing the real bottom edge past the canvas (clipped by
+    // its overflow:hidden). Pull it back up now that the real height — text
+    // wrap included — is measurable.
+    const cardBottom = card.getBoundingClientRect().height + p.y;
+    const overflow = cardBottom - (rect.height - edgePad);
+    if (overflow > 0) {
+      p.y = Math.max(edgePad, p.y - overflow);
+      card.style.top = p.y + 'px';
+    }
     updateStrikePath(card);
   });
   drawQuadrantLines(true);
@@ -3381,11 +3393,19 @@ function serializeBoardForShare() {
 
 // Published positions are absolute px on the owner's canvas; scale them to
 // this device's canvas so the map keeps its shape on any screen.
+//
+// The clamp bounds below must match the real card footprint from
+// canvasCardMetrics() — that's what forceNudge/computeCanvasPositions use to
+// keep cards on-canvas everywhere else. This used to hardcode a much smaller
+// card (140x40, 12px edge) than the actual rendered card (200x44, up to 64px
+// edgePad); on a resize that shrank the canvas, that let clamped positions
+// land well past the true safe area, so the real card spilled out under
+// .scatter-canvas's overflow:hidden and was clipped, partly invisible.
 function scaleSharedPositions(positions, sourceCanvas, targetW, targetH) {
   const scaled = {};
   const sw = sourceCanvas && sourceCanvas.w > 0 ? sourceCanvas.w : targetW;
   const sh = sourceCanvas && sourceCanvas.h > 0 ? sourceCanvas.h : targetH;
-  const EDGE = 12, CARD_W = 140, CARD_H = 40;
+  const { cardW: CARD_W, cardH: CARD_H, edgePad: EDGE } = canvasCardMetrics(targetW);
   Object.keys(positions).forEach(id => {
     const p = positions[id];
     if (!p) return;
