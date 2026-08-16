@@ -1632,6 +1632,7 @@ function addTaskToCanvas(text) {
     textEl.setAttribute('contenteditable', 'true');
     textEl.style.outline = 'none';
     textEl.focus();
+    attachPlainPaste(textEl);
     scrollCardIntoKeyboardView(card);
 
     const range = document.createRange();
