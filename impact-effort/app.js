@@ -1026,6 +1026,34 @@ function forceNudge(positions, canvasW, canvasH, edgePad, minGap) {
   return pos;
 }
 
+// A card's real height can exceed the nominal single-line metric that
+// canvasCardMetrics()/forceNudge() budget for once its text wraps onto
+// multiple lines — nothing above measures actual rendered size. Called
+// after a card is in the DOM, this re-measures it and nudges it back
+// inside the canvas so long text never renders with its bottom (or an
+// edge) clipped by .scatter-canvas's overflow:hidden.
+function clampCardWithinCanvas(card, taskId) {
+  const canvas = document.getElementById('scatter-canvas');
+  if (!canvas) return;
+  const canvasRect = canvas.getBoundingClientRect();
+  if (canvasRect.width <= 0 || canvasRect.height <= 0) return;
+  const cardRect = card.getBoundingClientRect();
+  const { edgePad } = canvasCardMetrics(canvasRect.width);
+  const x = parseFloat(card.style.left) || 0;
+  const y = parseFloat(card.style.top) || 0;
+  const maxX = canvasRect.width - cardRect.width - edgePad;
+  const maxY = canvasRect.height - cardRect.height - edgePad;
+  const clampedX = Math.max(edgePad, Math.min(maxX, x));
+  const clampedY = Math.max(edgePad, Math.min(maxY, y));
+  if (clampedX !== x || clampedY !== y) {
+    card.style.left = clampedX + 'px';
+    card.style.top = clampedY + 'px';
+    if (state.cardPositions[taskId]) {
+      state.cardPositions[taskId] = { x: clampedX, y: clampedY };
+    }
+  }
+}
+
 // ──────────────────────────────────────────────────────────────────────────────
 // Scatter animation
 // ──────────────────────────────────────────────────────────────────────────────
@@ -1177,6 +1205,7 @@ function buildCanvasCards(rm) {
         textEl.textContent = plainText;
         card.setAttribute('aria-label', `${plainText} — click to toggle done`);
         requestAnimationFrame(() => requestAnimationFrame(() => updateStrikePath(card)));
+        clampCardWithinCanvas(card, taskId);
         saveState();
         endEdit();
       }
@@ -1244,6 +1273,7 @@ function buildCanvasCards(rm) {
     });
 
     canvas.appendChild(card);
+    clampCardWithinCanvas(card, task.id);
   });
 }
 
@@ -1664,6 +1694,7 @@ function addTaskToCanvas(text) {
       textEl.innerHTML = cleaned || escapeHtml(originalText);
       card.setAttribute('aria-label', `${plainText} — click to toggle done`);
       requestAnimationFrame(() => requestAnimationFrame(() => updateStrikePath(card)));
+      clampCardWithinCanvas(card, taskId);
       saveState();
       endEdit();
     }
@@ -1735,6 +1766,7 @@ function addTaskToCanvas(text) {
   if (emptyEl) emptyEl.classList.remove('visible');
 
   canvas.appendChild(card);
+  clampCardWithinCanvas(card, task.id);
 
   requestAnimationFrame(() => requestAnimationFrame(() => {
     updateStrikePath(card);
