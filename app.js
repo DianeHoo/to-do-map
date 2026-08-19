@@ -2301,6 +2301,17 @@ function parseGridFile(text) {
     const n = /^t(\d+)$/.exec(t.id);
     if (n) counter = Math.max(counter, parseInt(n[1], 10));
   });
+  // History entries are read by buildHistoryTimeline() (entry.checkedCount)
+  // and selectSnapshot() (snap.items.forEach) with no null/shape guard —
+  // an entry that isn't shaped like our own cleanup snapshots (e.g. a bare
+  // `null` from a hand-edited file) throws there and wedges the timeline
+  // for the rest of the session. Drop anything that doesn't match, the same
+  // way idList() drops bad ids instead of failing the whole import.
+  const history = Array.isArray(g.history) ? g.history.filter(h =>
+    h && typeof h === 'object' &&
+    isFinite(h.ts) && isFinite(h.checkedCount) &&
+    Array.isArray(h.items) && h.items.every(it => it && typeof it.id === 'string')
+  ) : [];
   return {
     tasks,
     urgencyOrder: idList(g.urgencyOrder),
@@ -2309,7 +2320,7 @@ function parseGridFile(text) {
     cardPositions: positions,
     done: idList(g.done),
     idCounter: counter,
-    history: Array.isArray(g.history) ? g.history : [],
+    history,
   };
 }
 
