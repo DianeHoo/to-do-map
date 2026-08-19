@@ -2281,7 +2281,13 @@ function parseGridFile(text) {
   const tasks = [];
   for (const t of g.tasks) {
     if (!t || typeof t.id !== 'string' || typeof t.text !== 'string') return null;
-    tasks.push({ id: t.id, text: t.text });
+    // Every live editor caps task text at 500 chars (dump-input/canvas-add-input
+    // maxlength, plus the .slice(0, 500) in each inline-edit save()). A hand-edited
+    // or otherwise untrusted export file has no such limit, and an unbounded string
+    // renders as a card far taller than the canvas — clampCardWithinCanvas can only
+    // reposition a card, it can't shrink one taller than the canvas itself, so the
+    // excess stays clipped by .scatter-canvas's overflow:hidden. Cap on import too.
+    tasks.push({ id: t.id, text: t.text.slice(0, 500) });
   }
   const ids = new Set(tasks.map(t => t.id));
   const idList = (v) => (Array.isArray(v) ? v.filter(id => ids.has(id)) : []);
