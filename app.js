@@ -1694,14 +1694,20 @@ function addTaskToCanvas(text) {
       textEl.setAttribute('contenteditable', 'false');
       card._suppressNextClick = true;
       setTimeout(() => { card._suppressNextClick = false; }, 400);
-      const html = textEl.innerHTML;
       const plainText = (textEl.textContent.trim() || originalText).slice(0, 500);
       if (plainText !== originalText) {
         const t = state.tasks.find(t => t.id === taskId);
         if (t) t.text = plainText;
       }
-      const cleaned = html.replace(/<div>/gi, '<br>').replace(/<\/div>/gi, '').replace(/<p>/gi, '<br>').replace(/<\/p>/gi, '').replace(/^<br>/, '').trim();
-      textEl.innerHTML = cleaned || escapeHtml(originalText);
+      // Write back what persistence keeps: plain text. The old innerHTML
+      // round-trip kept pasted/dropped markup alive on screen until reload —
+      // attachPlainPaste blocks it arriving via paste, but a native
+      // drag-and-drop into this contenteditable bypasses that guard (drop
+      // isn't a paste event) and Blink's own drop-insertion default action
+      // still lands raw tags here. Same fix already applied to the
+      // dblclick handler in buildCanvasCards(); this editor kept the
+      // vulnerable round-trip.
+      textEl.textContent = plainText;
       card.setAttribute('aria-label', `${plainText} — click to toggle done`);
       requestAnimationFrame(() => requestAnimationFrame(() => updateStrikePath(card)));
       clampCardWithinCanvas(card, taskId);
