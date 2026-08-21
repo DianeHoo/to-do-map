@@ -177,6 +177,7 @@
       const input = el('input', 'map-rename-input');
       input.type = 'text';
       input.value = entry.name;
+      input.maxLength = 120; // matches maps-index.js's MAX_NAME_LEN
       input.setAttribute('aria-label', 'map name');
       let cancelled = false;
       input.addEventListener('keydown', (e) => {
