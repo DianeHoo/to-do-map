@@ -18,6 +18,15 @@
   const INDEX_KEY = 'todoMapsIndex.v1';
   const SLOT_PREFIX = 'todomap-map-';
 
+  // Rename has no native maxlength like the task-text inputs do (it's a plain
+  // .map-rename-input with none set) — an unbounded name renders as an
+  // unbounded-height home-grid card (.map-title only wraps, it never clamps),
+  // blowing out the whole grid layout for one long paste. Cap centrally so
+  // every writer (rename, create, duplicate, JSON import via home.js) is
+  // covered the same way parseGridFile caps task text on import.
+  const MAX_NAME_LEN = 120;
+  function capName(name) { return (name || '').trim().slice(0, MAX_NAME_LEN); }
+
   // Legacy single-map slots from before the home screen existed.
   const LEGACY_MAIN_KEY = 'eisenhower-matrix-state';
   const LEGACY_IMPACT_KEY = 'todomap-impact-effort-state';
@@ -86,7 +95,7 @@
     const entries = readIndex();
     entries.push({
       id,
-      name: (opts.name || '').trim() || 'untitled map',
+      name: capName(opts.name) || 'untitled map',
       kind,
       createdAt: now,
       updatedAt: now,
@@ -99,7 +108,7 @@
   }
 
   function rename(id, name) {
-    const trimmed = (name || '').trim();
+    const trimmed = capName(name);
     if (!trimmed) return get(id);
     return patch(id, { name: trimmed, updatedAt: Date.now() });
   }
@@ -117,10 +126,14 @@
     const data = readData(id);
     if (data && !writeData(copyId, data)) return null;
     const entries = readIndex();
-    // "name copy", "name copy 2", … — repeated duplicates stay tellable apart
+    // "name copy", "name copy 2", … — repeated duplicates stay tellable apart.
+    // Reserve room in the base name for the suffix so a capped result never
+    // swallows " copy N" entirely — that would make this and the previous
+    // attempt collide and spin the counter forever instead of terminating.
     const names = new Set(entries.map(e => e.name));
-    let name = entry.name + ' copy';
-    for (let n = 2; names.has(name); n++) name = entry.name + ' copy ' + n;
+    const base = entry.name.slice(0, MAX_NAME_LEN - 12);
+    let name = capName(base + ' copy');
+    for (let n = 2; names.has(name); n++) name = capName(base + ' copy ' + n);
     const now = Date.now();
     entries.push({
       id: copyId,
