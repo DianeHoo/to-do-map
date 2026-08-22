@@ -3579,8 +3579,13 @@ async function bootSharedView(mapId) {
     const data = record.data || {};
     // Trust nothing about a remote payload's shape: ids must be plain tokens
     // (they get interpolated into querySelector strings) and text a string.
+    // Every live editor caps task text at 500 chars (see parseGridFile's cap
+    // on the same class of untrusted-payload text); a share record isn't
+    // written by this browser's own editors, so cap it here too — otherwise
+    // a card renders far taller than the canvas, clipped by its overflow.
     state.tasks = (Array.isArray(data.tasks) ? data.tasks : []).filter(t =>
-      t && typeof t.id === 'string' && /^[\w-]+$/.test(t.id) && typeof t.text === 'string');
+      t && typeof t.id === 'string' && /^[\w-]+$/.test(t.id) && typeof t.text === 'string')
+      .map(t => ({ id: t.id, text: t.text.slice(0, 500) }));
     state.done = new Set(data.done || []);
     state.impactOrder = [];
     state.effortOrder = [];
