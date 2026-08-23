@@ -224,11 +224,19 @@
   // by cloud sync when the server side is the newer one. Optionally writes
   // the map's data slot in the same step. Returns false when storage refused
   // either write, so sync can retry instead of assuming the copy landed.
+  //
+  // The server's `name` column has no length constraint of its own (see
+  // maps-schema.sql) — every *local* writer of a name goes through capName
+  // (rename/create/duplicate above), but a row pulled down from another
+  // device or session bypasses all of them and lands here instead. Cap it
+  // the same way, or an unbounded name from the server blows out the home
+  // grid exactly like the unbounded-rename bug this file's capName() was
+  // added to fix, just reached via sync instead of the rename input.
   function adopt(entry, data) {
     if (!entry || !entry.id) return false;
     if (data !== undefined && !writeData(entry.id, data)) return false;
     const entries = readIndex().filter(e => e.id !== entry.id);
-    entries.push(entry);
+    entries.push(entry.name !== undefined ? { ...entry, name: capName(entry.name) || 'untitled map' } : entry);
     return writeIndex(entries);
   }
 
