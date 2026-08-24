@@ -465,6 +465,64 @@
     startRename(id);
   }
 
+  // PHASE_ORDER for both editor variants — kept here too since home.js runs
+  // before either editor's app.js is ever loaded.
+  const PHASE_ORDER = {
+    'urgency-importance': ['dump', 'sort-urgency', 'sort-importance', 'scatter'],
+    'impact-effort': ['dump', 'sort-impact', 'sort-effort', 'scatter'],
+  };
+
+  // Every live task-text entry point in both editors caps text at 500 chars
+  // (maxlength on the quick-add inputs, .slice(0, 500) in every inline-edit
+  // save(), and the editors' own parseGridFile() on their in-app import).
+  // This is a *second*, independently-written import path — the home
+  // screen's own "import from file" button — and it was building the new
+  // map's data straight from the parsed file with none of that validation:
+  // unbounded task text renders a card far taller than the canvas (same
+  // clipping bug parseGridFile() was fixed for), and malformed history
+  // entries crash buildHistoryTimeline()/selectSnapshot() the same way a
+  // hand-edited export could before parseGridFile() gained its own shape
+  // check. Mirror that same sanitizing here so this entry point is covered
+  // the same way the in-editor import already is.
+  function sanitizeImportedGrid(g, kind) {
+    const tasks = g.tasks.map(t => ({ id: t.id, text: t.text.slice(0, 500) }));
+    const ids = new Set(tasks.map(t => t.id));
+    const idList = (v) => (Array.isArray(v) ? v.filter(id => ids.has(id)) : []);
+    const positions = {};
+    if (g.cardPositions && typeof g.cardPositions === 'object') {
+      Object.keys(g.cardPositions).forEach(id => {
+        const p = g.cardPositions[id];
+        if (ids.has(id) && p && isFinite(p.x) && isFinite(p.y)) {
+          positions[id] = { x: Number(p.x), y: Number(p.y) };
+        }
+      });
+    }
+    let counter = (typeof g.idCounter === 'number' && isFinite(g.idCounter)) ? g.idCounter : 0;
+    tasks.forEach(t => {
+      const n = /^t(\d+)$/.exec(t.id);
+      if (n) counter = Math.max(counter, parseInt(n[1], 10));
+    });
+    const history = Array.isArray(g.history) ? g.history.filter(h =>
+      h && typeof h === 'object' &&
+      isFinite(h.ts) && isFinite(h.checkedCount) &&
+      Array.isArray(h.items) && h.items.every(it => it && typeof it.id === 'string')
+    ) : [];
+    const [orderA, orderB] = kind === 'impact-effort'
+      ? ['impactOrder', 'effortOrder']
+      : ['urgencyOrder', 'importanceOrder'];
+    const slot = {
+      tasks,
+      phase: PHASE_ORDER[kind].indexOf(g.phase) !== -1 ? g.phase : 'dump',
+      cardPositions: positions,
+      done: idList(g.done),
+      idCounter: counter,
+      history,
+    };
+    slot[orderA] = idList(g[orderA]);
+    slot[orderB] = idList(g[orderB]);
+    return slot;
+  }
+
   function importFromFile(file) {
     // Exports are a few KB; anything huge is the wrong file.
     if (file.size > 1024 * 1024) {
@@ -485,10 +543,7 @@
       }
       // Exports carry the variant's ordering fields, which tells us the kind.
       const kind = ('impactOrder' in g) ? 'impact-effort' : 'urgency-importance';
-      const slot = Object.assign({}, g, {
-        phase: g.phase || 'dump',
-        history: g.history || [],
-      });
+      const slot = sanitizeImportedGrid(g, kind);
       const id = Maps.create({
         kind,
         name: file.name.replace(/\.json$/i, ''),
