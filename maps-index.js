@@ -37,6 +37,71 @@
     'urgency-importance': 'urgency × importance',
     'impact-effort': 'impact × effort',
   };
+  const PHASE_ORDER = {
+    'urgency-importance': ['dump', 'sort-urgency', 'sort-importance', 'scatter'],
+    'impact-effort': ['dump', 'sort-impact', 'sort-effort', 'scatter'],
+  };
+  // Matches the maxlength on the quick-add inputs and the .slice(0, 500) in
+  // every inline-edit save() in both editors.
+  const MAX_TASK_TEXT_LEN = 500;
+
+  // Every live task-text entry point in both editors caps text at 500 chars,
+  // and both editors' own parseGridFile() plus home.js's sanitizeImportedGrid()
+  // independently re-check that cap (and task/history shape) on file import —
+  // each comment there explains why: unbounded text overflows the canvas, and
+  // a malformed history entry crashes buildHistoryTimeline()/selectSnapshot().
+  // Cloud sync (maps-cloud.js) is a *third* way board data lands in a map's
+  // local slot, and until now it wrote the server's `data` column straight
+  // through via writeData()/adopt() with none of that validation — the
+  // server's jsonb column only enforces a 200 KB total size (maps-schema.sql),
+  // nothing about task-text length or shape. A row pulled from another device
+  // (or one written by a future/buggy client version) hits the same bugs the
+  // two file-import paths were already fixed for. Mirror that same sanitizing
+  // here, centrally, the way capName() below already covers every name writer.
+  function sanitizeGridData(data, kind) {
+    const g = data && typeof data === 'object' ? data : {};
+    const tasks = Array.isArray(g.tasks)
+      ? g.tasks
+          .filter(t => t && typeof t.id === 'string' && typeof t.text === 'string')
+          .map(t => ({ id: t.id, text: t.text.slice(0, MAX_TASK_TEXT_LEN) }))
+      : [];
+    const ids = new Set(tasks.map(t => t.id));
+    const idList = (v) => (Array.isArray(v) ? v.filter(id => ids.has(id)) : []);
+    const positions = {};
+    if (g.cardPositions && typeof g.cardPositions === 'object') {
+      Object.keys(g.cardPositions).forEach(id => {
+        const p = g.cardPositions[id];
+        if (ids.has(id) && p && isFinite(p.x) && isFinite(p.y)) {
+          positions[id] = { x: Number(p.x), y: Number(p.y) };
+        }
+      });
+    }
+    let counter = (typeof g.idCounter === 'number' && isFinite(g.idCounter)) ? g.idCounter : 0;
+    tasks.forEach(t => {
+      const n = /^t(\d+)$/.exec(t.id);
+      if (n) counter = Math.max(counter, parseInt(n[1], 10));
+    });
+    const history = Array.isArray(g.history) ? g.history.filter(h =>
+      h && typeof h === 'object' &&
+      isFinite(h.ts) && isFinite(h.checkedCount) &&
+      Array.isArray(h.items) && h.items.every(it => it && typeof it.id === 'string')
+    ) : [];
+    const phaseOrder = PHASE_ORDER[kind] || PHASE_ORDER[KINDS[0]];
+    const [orderA, orderB] = kind === 'impact-effort'
+      ? ['impactOrder', 'effortOrder']
+      : ['urgencyOrder', 'importanceOrder'];
+    const slot = {
+      tasks,
+      phase: phaseOrder.indexOf(g.phase) !== -1 ? g.phase : 'dump',
+      cardPositions: positions,
+      done: idList(g.done),
+      idCounter: counter,
+      history,
+    };
+    slot[orderA] = idList(g[orderA]);
+    slot[orderB] = idList(g[orderB]);
+    return slot;
+  }
 
   function slotKey(id) { return SLOT_PREFIX + id; }
 
@@ -291,6 +356,7 @@
     setShare,
     readData,
     writeData,
+    sanitizeGridData,
     migrateLegacy,
   };
 })();
