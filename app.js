@@ -2249,7 +2249,7 @@ function rerenderFromState() {
       const canvas = document.getElementById('scatter-canvas');
       const rect = canvas.getBoundingClientRect();
       if (rect.width > 0) {
-        if (Object.keys(state.cardPositions).length === 0) {
+        if (state.tasks.some(t => !state.cardPositions[t.id])) {
           state.cardPositions = computeCanvasPositions(rect.width, rect.height);
           state.scatterSig = rankingSignature();
         }
@@ -3541,7 +3541,7 @@ async function bootSharedView(mapId) {
       const canvas = document.getElementById('scatter-canvas');
       const rect = canvas.getBoundingClientRect();
       if (rect.width === 0) return;
-      if (Object.keys(state.cardPositions).length === 0) {
+      if (state.tasks.some(t => !state.cardPositions[t.id])) {
         state.cardPositions = computeCanvasPositions(rect.width, rect.height);
       }
       // A returning sandbox may have been laid out on a different window size
@@ -3729,7 +3729,7 @@ function init() {
         const canvas = document.getElementById('scatter-canvas');
         const canvasRect = canvas.getBoundingClientRect();
         if (canvasRect.width > 0) {
-          if (Object.keys(state.cardPositions).length === 0) {
+          if (state.tasks.some(t => !state.cardPositions[t.id])) {
             state.cardPositions = computeCanvasPositions(canvasRect.width, canvasRect.height);
             state.scatterSig = rankingSignature();
           }
