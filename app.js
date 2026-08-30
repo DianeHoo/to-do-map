@@ -3576,7 +3576,11 @@ async function bootSharedView(mapId) {
     state.tasks = (Array.isArray(data.tasks) ? data.tasks : []).filter(t =>
       t && typeof t.id === 'string' && /^[\w-]+$/.test(t.id) && typeof t.text === 'string')
       .map(t => ({ id: t.id, text: t.text.slice(0, 500) }));
-    state.done = new Set(data.done || []);
+    // done ids get the same treatment idList() gives them on file import:
+    // filtered down to real task ids, so a dangling or unsafe id in the
+    // payload can't reach doCleanup()'s querySelector interpolation.
+    const liveIds = new Set(state.tasks.map(t => t.id));
+    state.done = new Set(Array.isArray(data.done) ? data.done.filter(id => liveIds.has(id)) : []);
     state.urgencyOrder = [];
     state.importanceOrder = [];
     state.history = [];
