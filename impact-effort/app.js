@@ -2178,12 +2178,21 @@ function doCleanup() {
         const restored = new Set(undoData.tasks.map(t => t.id));
         const addedSince = state.tasks.filter(t => !restored.has(t.id));
         const curPos = state.cardPositions;
+        // Same reason curPos is grabbed above: state.done is about to be
+        // replaced wholesale with the pre-cleanup snapshot, which knows
+        // nothing about an added-since task the user checked off in the
+        // meantime — capture that before it's gone, or undo silently
+        // unchecks a task that was never part of this cleanup.
+        const curDone = state.done;
         state.tasks = undoData.tasks.concat(addedSince);
         state.done = new Set(undoData.done);
         state.impactOrder = undoData.impactOrder.concat(addedSince.map(t => t.id));
         state.effortOrder = undoData.effortOrder.concat(addedSince.map(t => t.id));
         state.cardPositions = { ...undoData.cardPositions };
-        addedSince.forEach(t => { if (curPos[t.id]) state.cardPositions[t.id] = curPos[t.id]; });
+        addedSince.forEach(t => {
+          if (curPos[t.id]) state.cardPositions[t.id] = curPos[t.id];
+          if (curDone.has(t.id)) state.done.add(t.id);
+        });
         state.scatterSig = rankingSignature();
         state.history.pop(); // drop the snapshot this cleanup just pushed
         hSelected = hNowIdx();
