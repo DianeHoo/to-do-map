@@ -535,8 +535,14 @@
       let data = null;
       try { data = JSON.parse(e.target.result); } catch (err) { /* handled below */ }
       const g = data && data.grid;
+      // Ids must be plain tokens, matching parseGridFile()'s own check in both
+      // editors: a task's id gets interpolated into `[data-id="${t.id}"]`
+      // querySelector strings once this map is opened, with no escaping —
+      // an id like `t1"]` breaks out of the attribute selector and throws a
+      // DOMException the first time any of those call sites run. This is a
+      // second, independently-written import path, so it needs the same guard.
       const tasksOk = g && Array.isArray(g.tasks) &&
-        g.tasks.every((t) => t && typeof t.id === 'string' && typeof t.text === 'string');
+        g.tasks.every((t) => t && typeof t.id === 'string' && /^[\w-]+$/.test(t.id) && typeof t.text === 'string');
       if (!tasksOk) {
         showToast('couldn’t import — not a to-do map export.');
         return;

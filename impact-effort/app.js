@@ -2305,7 +2305,16 @@ function parseGridFile(text) {
   if (!g || !Array.isArray(g.tasks)) return null;
   const tasks = [];
   for (const t of g.tasks) {
-    if (!t || typeof t.id !== 'string' || typeof t.text !== 'string') return null;
+    // Ids get interpolated into `[data-id="${t.id}"]` querySelector strings
+    // all over this file (buildCanvasCards, cleanup snapshots, done-toggling)
+    // with no escaping. bootSharedView's seedFromRecord() already restricts a
+    // remote share record's ids to this same shape for exactly that reason —
+    // a hand-edited or otherwise untrusted export file can carry an id like
+    // `t1"]` just as easily, and an unescaped quote breaks out of the
+    // attribute selector, throwing a DOMException the first time any of
+    // those call sites run. Reject it the same way a malformed id is
+    // rejected below, rather than let it into an id list at all.
+    if (!t || typeof t.id !== 'string' || !/^[\w-]+$/.test(t.id) || typeof t.text !== 'string') return null;
     // Every live editor caps task text at 500 chars (dump-input/canvas-add-input
     // maxlength, plus the .slice(0, 500) in each inline-edit save()). A hand-edited
     // or otherwise untrusted export file has no such limit, and an unbounded string
