@@ -415,21 +415,24 @@
       const serverMs = Date.parse(row.updated_at) || 0;
       const local = localById[row.id];
       if (!local) {
-        // New on the server (another tab/session of this account)
+        // New on the server (another tab/session of this account). The
+        // server's `data` column carries none of the shape/length guards
+        // the local writers enforce (see sanitizeGridData's comment in
+        // maps-index.js) — sanitize before it ever reaches localStorage.
         const ok = TodoMapsIndex.adopt({
           id: row.id,
           name: row.name,
           kind: row.map_kind,
           createdAt: Date.parse(row.created_at) || serverMs,
           updatedAt: serverMs,
-        }, row.data);
+        }, TodoMapsIndex.sanitizeGridData(row.data, row.map_kind));
         if (ok) changed = true;
         else failed = true;
       } else if (serverMs > (local.updatedAt || 0) + SKEW_MS) {
         // Quota can refuse the slot write — then the entry must keep its old
         // updatedAt so the next sync retries, instead of recording a version
         // this browser doesn't actually have.
-        if (TodoMapsIndex.writeData(row.id, row.data)) {
+        if (TodoMapsIndex.writeData(row.id, TodoMapsIndex.sanitizeGridData(row.data, row.map_kind))) {
           TodoMapsIndex.adopt({ ...local, name: row.name, kind: row.map_kind, updatedAt: serverMs }, undefined);
           changed = true;
         } else {

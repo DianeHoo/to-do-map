@@ -3787,7 +3787,11 @@ function init() {
       if (!local || row.map_kind !== local.kind) return;
       const serverMs = Date.parse(row.updated_at) || 0;
       if (serverMs <= (local.updatedAt || 0) + 2000) return; // same skew window as sync
-      if (!TodoMapsIndex.writeData(MAP_URL_ID, row.data)) return;
+      // The server row's `data` carries none of the shape/length guards this
+      // page's own writers enforce (see sanitizeGridData's comment in
+      // maps-index.js) — sanitize before it's written and immediately
+      // rendered below.
+      if (!TodoMapsIndex.writeData(MAP_URL_ID, TodoMapsIndex.sanitizeGridData(row.data, row.map_kind))) return;
       TodoMapsIndex.adopt({ ...local, name: row.name, updatedAt: serverMs }, undefined);
       loadSavedState();
       rerenderFromState();
