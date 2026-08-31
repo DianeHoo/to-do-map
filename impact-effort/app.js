@@ -3722,7 +3722,11 @@ function init() {
   if (window.TodoMapsIndex) {
     const entry = TodoMapsIndex.get(MAP_URL_ID);
     // An urgency/importance map opened on this page — hand it to the main
-    // editor before anything touches its slot.
+    // editor before anything touches its slot. Checked as "isn't this kind"
+    // on purpose: any entry.kind this variant doesn't recognize (bad sync
+    // data, a hand-edited index, a future kind) belongs on the main page by
+    // default, same as home.js/dock.js's own routing — see the matching
+    // comment in app.js's init() for why the main page's check must agree.
     if (entry && entry.kind !== 'impact-effort') {
       location.replace('../?map=' + encodeURIComponent(MAP_URL_ID));
       return;

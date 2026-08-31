@@ -306,11 +306,23 @@
   // the same way, or an unbounded name from the server blows out the home
   // grid exactly like the unbounded-rename bug this file's capName() was
   // added to fix, just reached via sync instead of the rename input.
+  //
+  // kind gets the same treatment create() already gives it: the server's
+  // map_kind column is CHECK-constrained today, but nothing client-side
+  // guarantees that (a row synced before the constraint existed, or a
+  // hand-edited index entry, both land here). Both editors' init() route a
+  // map by kind — an entry.kind neither one recognizes makes them redirect
+  // to each other forever, so fall back to KINDS[0] exactly like create().
   function adopt(entry, data) {
     if (!entry || !entry.id) return false;
     if (data !== undefined && !writeData(entry.id, data)) return false;
     const entries = readIndex().filter(e => e.id !== entry.id);
-    entries.push(entry.name !== undefined ? { ...entry, name: capName(entry.name) || 'untitled map' } : entry);
+    let toInsert = entry;
+    if (toInsert.name !== undefined) toInsert = { ...toInsert, name: capName(toInsert.name) || 'untitled map' };
+    if (toInsert.kind !== undefined && KINDS.indexOf(toInsert.kind) === -1) {
+      toInsert = { ...toInsert, kind: KINDS[0] };
+    }
+    entries.push(toInsert);
     return writeIndex(entries);
   }
 

@@ -3703,8 +3703,14 @@ function init() {
   if (window.TodoMapsIndex) {
     const entry = TodoMapsIndex.get(MAP_URL_ID);
     // An impact/effort map opened on the main page — hand it to that variant
-    // before anything touches its slot.
-    if (entry && entry.kind !== 'urgency-importance') {
+    // before anything touches its slot. Checked as "is the other kind", not
+    // "isn't this kind": entry.kind can be a value neither editor recognizes
+    // (a row synced before the server's map_kind CHECK existed, a future
+    // client, a hand-edited index) — home.js and dock.js already route those
+    // here by default, and this variant's own redirect must agree, or such a
+    // map bounces forever between the two pages (impact-effort/app.js redirects
+    // anything that isn't 'impact-effort' straight back to this one).
+    if (entry && entry.kind === 'impact-effort') {
       location.replace('impact-effort/?map=' + encodeURIComponent(MAP_URL_ID));
       return;
     }
