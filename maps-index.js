@@ -62,7 +62,16 @@
     const g = data && typeof data === 'object' ? data : {};
     const tasks = Array.isArray(g.tasks)
       ? g.tasks
-          .filter(t => t && typeof t.id === 'string' && typeof t.text === 'string')
+          // Ids get interpolated unescaped into `[data-id="${t.id}"]`
+          // querySelector strings throughout both editors (buildCanvasCards,
+          // cleanup snapshots, done-toggling). parseGridFile() in both
+          // editors and home.js's file-import gate already reject an id
+          // that doesn't match this shape (b9cd1ba) — a remote row pulled
+          // from another device (or a future/buggy client) can carry an id
+          // like `t1"]` just as easily as a hand-edited export file, and an
+          // unescaped quote breaks out of the attribute selector, throwing
+          // a DOMException the first time any of those call sites run.
+          .filter(t => t && typeof t.id === 'string' && /^[\w-]+$/.test(t.id) && typeof t.text === 'string')
           .map(t => ({ id: t.id, text: t.text.slice(0, MAX_TASK_TEXT_LEN) }))
       : [];
     const ids = new Set(tasks.map(t => t.id));
