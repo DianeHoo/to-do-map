@@ -3539,7 +3539,15 @@ async function bootSharedView(mapId) {
   }
   TodoMapShare.hideLoading();
 
-  if (record && record.map_kind !== SHARE_MAP_KIND) {
+  // Checked as "is the other kind", not "isn't this kind" — a record.map_kind
+  // neither editor recognizes (a row synced before the server's map_kind
+  // CHECK existed, a future client) must not redirect here: this page's own
+  // init() routing was already fixed for exactly this (570e1d2), and app.js's
+  // bootSharedView was fixed the same way (#20), but this file's own
+  // bootSharedView still had the old asymmetric check — an unrecognized kind
+  // bounced forever (this page sends anything that isn't 'impact-effort' to
+  // ../, which sends anything that isn't 'urgency-importance' right back).
+  if (record && record.map_kind === 'urgency-importance') {
     // An urgency/importance link opened on this page — hand it to the main map
     location.replace('../#m=' + mapId);
     return;
