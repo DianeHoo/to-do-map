@@ -3520,7 +3520,15 @@ async function bootSharedView(mapId) {
   }
   TodoMapShare.hideLoading();
 
-  if (record && record.map_kind !== SHARE_MAP_KIND) {
+  // Checked as "is the other kind", not "isn't this kind" — a record.map_kind
+  // neither editor recognizes (a row synced before the server's map_kind
+  // CHECK existed, a future client) must not redirect here: this page's own
+  // init() routing was already fixed for exactly this (570e1d2) but this
+  // share-link path was missed, so an unrecognized kind bounced forever
+  // (this page sends anything that isn't 'urgency-importance' to
+  // impact-effort/, which sends anything that isn't 'impact-effort' right
+  // back).
+  if (record && record.map_kind === 'impact-effort') {
     // An impact/effort link opened on the main page — hand it to that variant
     location.replace('impact-effort/#m=' + mapId);
     return;
