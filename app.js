@@ -2294,6 +2294,7 @@ function parseGridFile(text) {
   const g = data && data.grid;
   if (!g || !Array.isArray(g.tasks)) return null;
   const tasks = [];
+  const seenTaskIds = new Set();
   for (const t of g.tasks) {
     // Ids get interpolated into `[data-id="${t.id}"]` querySelector strings
     // all over this file (buildCanvasCards, cleanup snapshots, done-toggling)
@@ -2305,6 +2306,14 @@ function parseGridFile(text) {
     // those call sites run. Reject it the same way a malformed id is
     // rejected below, rather than let it into an id list at all.
     if (!t || typeof t.id !== 'string' || !/^[\w-]+$/.test(t.id) || typeof t.text !== 'string') return null;
+    // Two tasks sharing an id survive that check just as easily — a
+    // hand-edited file, or a re-imported export that was itself corrupted.
+    // Every id-based task operation (delete, doCleanup's "remove done
+    // tasks") does `state.tasks.filter(t => t.id !== id)`, which assumes
+    // ids are unique: with a duplicate, deleting or completing one silently
+    // removes the other too. Skip repeats instead of importing them.
+    if (seenTaskIds.has(t.id)) continue;
+    seenTaskIds.add(t.id);
     // Every live editor caps task text at 500 chars (dump-input/canvas-add-input
     // maxlength, plus the .slice(0, 500) in each inline-edit save()). A hand-edited
     // or otherwise untrusted export file has no such limit, and an unbounded string
@@ -3590,8 +3599,16 @@ async function bootSharedView(mapId) {
     // on the same class of untrusted-payload text); a share record isn't
     // written by this browser's own editors, so cap it here too — otherwise
     // a card renders far taller than the canvas, clipped by its overflow.
+    const seenTaskIds = new Set();
     state.tasks = (Array.isArray(data.tasks) ? data.tasks : []).filter(t =>
       t && typeof t.id === 'string' && /^[\w-]+$/.test(t.id) && typeof t.text === 'string')
+      // A published record can carry two tasks with the same id (another
+      // client's bug, a re-synced hand-edited export). Every id-based task
+      // operation (delete, doCleanup's "remove done tasks") does
+      // `state.tasks.filter(t => t.id !== id)`, which assumes ids are
+      // unique — with a duplicate, deleting or completing one silently
+      // removes the other too. Keep the first occurrence of each id.
+      .filter(t => (seenTaskIds.has(t.id) ? false : (seenTaskIds.add(t.id), true)))
       .map(t => ({ id: t.id, text: t.text.slice(0, 500) }));
     // done ids get the same treatment idList() gives them on file import:
     // filtered down to real task ids, so a dangling or unsafe id in the
