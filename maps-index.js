@@ -90,11 +90,20 @@
       const n = /^t(\d+)$/.exec(t.id);
       if (n) counter = Math.max(counter, parseInt(n[1], 10));
     });
+    // Both editors' parseGridFile() reject a history item that's missing
+    // `text` or carrying non-numeric `x`/`y` (selectSnapshot() reads text
+    // through escapeHtml into a ghost card and feeds x/y straight into
+    // Math.min/Math.max) — a remote row can carry the same shape as easily
+    // as a hand-edited export file, and this check only ever verified `id`.
+    // Mirror that same per-item guard here, the way sanitizeGridData already
+    // mirrors every other file-import check.
     const history = Array.isArray(g.history) ? g.history.filter(h =>
       h && typeof h === 'object' &&
       isFinite(h.ts) && isFinite(h.checkedCount) &&
-      Array.isArray(h.items) && h.items.every(it => it && typeof it.id === 'string')
-    ) : [];
+      Array.isArray(h.items) && h.items.every(it =>
+        it && typeof it.id === 'string' && typeof it.text === 'string' &&
+        isFinite(it.x) && isFinite(it.y))
+    ).map(h => ({ ...h, items: h.items.map(it => ({ ...it, text: it.text.slice(0, MAX_TASK_TEXT_LEN) })) })) : [];
     const phaseOrder = PHASE_ORDER[kind] || PHASE_ORDER[KINDS[0]];
     const [orderA, orderB] = kind === 'impact-effort'
       ? ['impactOrder', 'effortOrder']
