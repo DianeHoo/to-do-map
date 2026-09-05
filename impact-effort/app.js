@@ -2356,11 +2356,22 @@ function parseGridFile(text) {
   // `null` from a hand-edited file) throws there and wedges the timeline
   // for the rest of the session. Drop anything that doesn't match, the same
   // way idList() drops bad ids instead of failing the whole import.
+  //
+  // The per-item check below only ever verified `id` — selectSnapshot() also
+  // reads item.text (interpolated into a ghost card via escapeHtml) and
+  // item.x/item.y (fed straight into clampSnapX/clampSnapY's Math.min/
+  // Math.max). An item missing text or carrying non-numeric coordinates
+  // survived this filter just as easily as a malformed id used to, and
+  // rendered a ghost card showing the literal string "undefined" at an
+  // uncomputed (NaN) position instead of a real snapshot value. Reject it,
+  // and cap surviving text the same way live task text is capped above.
   const history = Array.isArray(g.history) ? g.history.filter(h =>
     h && typeof h === 'object' &&
     isFinite(h.ts) && isFinite(h.checkedCount) &&
-    Array.isArray(h.items) && h.items.every(it => it && typeof it.id === 'string')
-  ) : [];
+    Array.isArray(h.items) && h.items.every(it =>
+      it && typeof it.id === 'string' && typeof it.text === 'string' &&
+      isFinite(it.x) && isFinite(it.y))
+  ).map(h => ({ ...h, items: h.items.map(it => ({ ...it, text: it.text.slice(0, 500) })) })) : [];
   return {
     tasks,
     impactOrder: idList(g.impactOrder),
