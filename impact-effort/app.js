@@ -2333,7 +2333,23 @@ function parseGridFile(text) {
     tasks.push({ id: t.id, text: t.text.slice(0, 500) });
   }
   const ids = new Set(tasks.map(t => t.id));
-  const idList = (v) => (Array.isArray(v) ? v.filter(id => ids.has(id)) : []);
+  // renderSortList() draws one card per entry in impactOrder/effortOrder,
+  // keyed by id with no dedup of its own — a repeated id in an untrusted
+  // payload survives the ids.has() check twice and renders as two identical
+  // cards for the same task. Worse, onSortKeyDown's `order.indexOf(id)`
+  // always resolves to the *first* copy, so arrow-key reordering on the
+  // second (visually identical) card silently moves the wrong one. Keep
+  // only the first occurrence of each id, same as the shape checks above
+  // reject the rest of a bad entry instead of failing the whole import.
+  const idList = (v) => {
+    if (!Array.isArray(v)) return [];
+    const seen = new Set();
+    const out = [];
+    for (const id of v) {
+      if (ids.has(id) && !seen.has(id)) { seen.add(id); out.push(id); }
+    }
+    return out;
+  };
   const positions = {};
   if (g.cardPositions && typeof g.cardPositions === 'object') {
     Object.keys(g.cardPositions).forEach(id => {
