@@ -485,7 +485,16 @@
   // check. Mirror that same sanitizing here so this entry point is covered
   // the same way the in-editor import already is.
   function sanitizeImportedGrid(g, kind) {
-    const tasks = g.tasks.map(t => ({ id: t.id, text: t.text.slice(0, 500) }));
+    // importFromFile()'s tasksOk gate above only checks each id's shape, not
+    // uniqueness — a hand-edited file can still carry two tasks with the same
+    // id. Every id-based task operation in the editors (delete, doCleanup's
+    // "remove done tasks") does `state.tasks.filter(t => t.id !== id)`, which
+    // assumes ids are unique: with a duplicate, deleting or completing one
+    // silently removes the other too. Keep the first occurrence of each id.
+    const seenTaskIds = new Set();
+    const tasks = g.tasks
+      .filter(t => (seenTaskIds.has(t.id) ? false : (seenTaskIds.add(t.id), true)))
+      .map(t => ({ id: t.id, text: t.text.slice(0, 500) }));
     const ids = new Set(tasks.map(t => t.id));
     const idList = (v) => (Array.isArray(v) ? v.filter(id => ids.has(id)) : []);
     const positions = {};

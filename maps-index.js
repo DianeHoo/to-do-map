@@ -60,6 +60,7 @@
   // here, centrally, the way capName() below already covers every name writer.
   function sanitizeGridData(data, kind) {
     const g = data && typeof data === 'object' ? data : {};
+    const seenTaskIds = new Set();
     const tasks = Array.isArray(g.tasks)
       ? g.tasks
           // Ids get interpolated unescaped into `[data-id="${t.id}"]`
@@ -72,6 +73,14 @@
           // unescaped quote breaks out of the attribute selector, throwing
           // a DOMException the first time any of those call sites run.
           .filter(t => t && typeof t.id === 'string' && /^[\w-]+$/.test(t.id) && typeof t.text === 'string')
+          // Every id-based task operation (delete, doCleanup's "remove done
+          // tasks") does `state.tasks.filter(t => t.id !== id)`, which
+          // assumes ids are unique — a remote row that isn't (another
+          // device's bug, a future client, a hand-edited export re-synced)
+          // makes two unrelated tasks vanish together the moment either one
+          // is deleted or completed, even though the user only acted on one.
+          // Keep the first occurrence of each id and drop the rest.
+          .filter(t => (seenTaskIds.has(t.id) ? false : (seenTaskIds.add(t.id), true)))
           .map(t => ({ id: t.id, text: t.text.slice(0, MAX_TASK_TEXT_LEN) }))
       : [];
     const ids = new Set(tasks.map(t => t.id));
