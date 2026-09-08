@@ -1240,6 +1240,7 @@ function buildCanvasCards(rm) {
     });
 
     card.addEventListener('keydown', e => {
+      if (state.viewingIdx !== null) return; // history view is read-only — see selectSnapshot()
       if (e.key === 'Enter' || e.key === ' ') {
         e.preventDefault();
         onCanvasCardTap(card, task.id);
@@ -1748,6 +1749,7 @@ function addTaskToCanvas(text) {
   });
 
   card.addEventListener('keydown', e => {
+    if (state.viewingIdx !== null) return; // history view is read-only — see selectSnapshot()
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
       onCanvasCardTap(card, task.id);
