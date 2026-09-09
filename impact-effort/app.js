@@ -1195,6 +1195,16 @@ function buildCanvasCards(rm) {
         textEl.setAttribute('contenteditable', 'false');
         card._suppressNextClick = true;
         setTimeout(() => { card._suppressNextClick = false; }, 400);
+        if (state.viewingIdx !== null) {
+          // History view is read-only — see selectSnapshot(). This edit can
+          // have started in live view before a click on the (non-focusable)
+          // history timeline froze the canvas underneath it without blurring
+          // the still-open edit; discard rather than commit a live mutation
+          // while frozen on a snapshot.
+          textEl.textContent = originalText;
+          endEdit();
+          return;
+        }
         const plainText = (textEl.textContent.trim() || originalText).slice(0, 500);
         if (plainText !== originalText) {
           const t = state.tasks.find(t => t.id === taskId);
@@ -1698,6 +1708,16 @@ function addTaskToCanvas(text) {
       textEl.setAttribute('contenteditable', 'false');
       card._suppressNextClick = true;
       setTimeout(() => { card._suppressNextClick = false; }, 400);
+      if (state.viewingIdx !== null) {
+        // History view is read-only — see selectSnapshot(). This edit can
+        // have started in live view before a click on the (non-focusable)
+        // history timeline froze the canvas underneath it without blurring
+        // the still-open edit; discard rather than commit a live mutation
+        // while frozen on a snapshot.
+        textEl.textContent = originalText;
+        endEdit();
+        return;
+      }
       const plainText = (textEl.textContent.trim() || originalText).slice(0, 500);
       if (plainText !== originalText) {
         const t = state.tasks.find(t => t.id === taskId);
