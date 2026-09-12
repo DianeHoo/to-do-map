@@ -233,12 +233,27 @@
       dialog.appendChild(row);
 
       const actions = el('div', 'share-dialog-actions');
+      // Update and Stop-sharing both read-modify-write the same share record
+      // asynchronously. Without mutual exclusion, clicking Update and then
+      // Stop sharing before the first request lands lets them race: Stop's
+      // delete can finish and clear the record first, then Update's
+      // already-in-flight response resolves and calls opts.setShare() again,
+      // resurrecting a share record that points at a link the server just
+      // deleted — the map now looks shared locally forever, with a dead link.
+      // One in-flight flag, checked by both handlers, makes them mutually
+      // exclusive so a stale response can never overwrite what the other one
+      // already committed.
+      let busy = false;
+
       const updateBtn = el('button', 'share-btn-quiet', 'Update shared link');
       updateBtn.addEventListener('click', async () => {
+        if (busy) return;
         const rec = opts.getShare();
         if (!rec || rec.id !== id) return;
         const fresh = opts.serialize();
+        busy = true;
         updateBtn.disabled = true;
+        stopBtn.disabled = true;
         setStatus('Updating…');
         try {
           const ok = await api.update(id, rec.ownerKey, fresh);
@@ -253,13 +268,18 @@
         } catch (err) {
           setStatus(err.message, true);
         }
+        busy = false;
         updateBtn.disabled = false;
+        stopBtn.disabled = false;
       });
 
       const stopBtn = el('button', 'share-btn-quiet share-btn-danger', 'Stop sharing');
       stopBtn.addEventListener('click', async () => {
+        if (busy) return;
         const rec = opts.getShare();
         if (!rec || rec.id !== id) return;
+        busy = true;
+        updateBtn.disabled = true;
         stopBtn.disabled = true;
         setStatus('Removing…');
         try {
@@ -269,6 +289,8 @@
           renderUnpublishedState();
         } catch (err) {
           setStatus(err.message, true);
+          busy = false;
+          updateBtn.disabled = false;
           stopBtn.disabled = false;
         }
       });
