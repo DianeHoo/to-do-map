@@ -297,6 +297,27 @@
     }
   }
 
+  // Settle exactly one queued revoke — used when *that map's own* undo
+  // window expires. drainShareRevokes() above sweeps the whole queue, which
+  // is right for a boot-time syncNow but wrong here: home.js's delete-undo
+  // toast is a single shared widget, so deleting a second map while the
+  // first one's toast is still up pre-empts it (see showToast's queueing
+  // comment) and fires its onExpire immediately — at that moment the second
+  // map's own revoke may already be queued (it's added before its toast is
+  // shown) even though *its* 5s undo window just started. Draining
+  // everything there would revoke the second map's still-undoable link.
+  async function revokeShareIfQueued(shareId, ownerKey) {
+    if (!shareId || !window.TodoMapShare || !TodoMapShare.remove) return;
+    if (!readRevokes().some(r => r.id === shareId)) return; // already settled or undone
+    try {
+      await TodoMapShare.remove(shareId, ownerKey);
+      dequeueShareRevoke(shareId);
+    } catch (e) {
+      if (/not found|no rows|404/i.test(e.message || '')) dequeueShareRevoke(shareId);
+      else warn('share revoke failed (will retry):', e.message);
+    }
+  }
+
   // ── Push / delete / sync ────────────────────────────────────────────────────
 
   function rowFor(entry) {
@@ -529,6 +550,7 @@
     queueShareRevoke,
     dequeueShareRevoke,
     drainShareRevokes,
+    revokeShareIfQueued,
     getStatus,
     onStatus,
     currentUser,

@@ -342,7 +342,13 @@
         render();
       },
       onExpire: () => {
-        if (share && share.id && revokes) revokes.drainShareRevokes();
+        // Only this map's own queued revoke — a second delete's showToast()
+        // can pre-empt this toast and fire onExpire before its 5s window is
+        // really up (see showToast's queueing comment), and by then the
+        // *next* map's own revoke may already be queued too. Draining the
+        // whole queue here would revoke that other map's still-undoable
+        // link early; revokeShareIfQueued only ever touches this one.
+        if (share && share.id && revokes) revokes.revokeShareIfQueued(share.id, share.ownerKey);
       },
     });
   }
