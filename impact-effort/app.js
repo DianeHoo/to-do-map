@@ -1616,6 +1616,14 @@ function findFreeCanvasSpot(canvasW, canvasH) {
 }
 
 function addTaskToCanvas(text) {
+  // History view is read-only — see selectSnapshot(). The add-input can still
+  // hold focus and receive Enter while frozen on a snapshot: the history
+  // timeline's entries are non-focusable, so clicking one to freeze the
+  // canvas never blurs an already-open add-input, and the canvas-toolbar's
+  // pointer-events:none while frozen only blocks the mouse, not a keydown on
+  // an element that already has focus. Discard rather than add a new live
+  // task while frozen.
+  if (state.viewingIdx !== null) return;
   const task = { id: makeId(), text };
   state.tasks.push(task);
 
