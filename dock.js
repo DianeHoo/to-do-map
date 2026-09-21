@@ -228,6 +228,9 @@
   hotzone.addEventListener('mouseenter', open);
   hotzone.addEventListener('focus', open);
   dock.addEventListener('mouseleave', close);
+  hotzone.addEventListener('focusout', function (e) {
+    if (!dock.contains(e.relatedTarget) && e.relatedTarget !== hotzone) close();
+  });
   dock.addEventListener('focusout', function (e) {
     if (!dock.contains(e.relatedTarget) && e.relatedTarget !== hotzone) close();
   });
