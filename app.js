@@ -1904,6 +1904,21 @@ function setupLongPressDrag(card, id) {
     card.style.boxShadow = '';
     card.style.transition = 'box-shadow 150ms ease';
 
+    if (state.viewingIdx !== null) {
+      // History view is read-only — see selectSnapshot(). setPointerCapture()
+      // (mouse) and the touchmove/touchend listeners above keep delivering
+      // events to this card no matter what pointer-events selectSnapshot()
+      // just set on it, so a drag already in flight when the history
+      // timeline freezes the canvas keeps moving this one card instead of
+      // stopping with the rest of the board. Same class of read-only
+      // violation already fixed on the keyboard, text-edit and add-task
+      // paths — re-show wherever selectSnapshot() put this card and discard
+      // the drag rather than commit a live position change while frozen.
+      selectSnapshot(state.viewingIdx);
+      setTimeout(() => { card._suppressNextClick = false; card.style.transition = ''; }, 200);
+      return;
+    }
+
     state.cardPositions[id] = {
       x: parseFloat(card.style.left),
       y: parseFloat(card.style.top),
