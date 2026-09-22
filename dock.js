@@ -235,7 +235,13 @@
     if (!dock.contains(e.relatedTarget) && e.relatedTarget !== hotzone) close();
   });
   document.addEventListener('keydown', function (e) {
-    if (e.key === 'Escape' && dock.classList.contains('open')) close();
+    if (e.key !== 'Escape') return;
+    if (dock.classList.contains('open')) close();
+    // The touch chip+sheet dropdown is defined further down, but Escape
+    // needs to reach it too — every other popover in this codebase closes
+    // on Escape (home.js's kindPicker/authModal/card menu, app.js's corner
+    // popovers), and this one silently didn't.
+    if (sheet.classList.contains('open')) sheet.classList.remove('open');
   });
 
   // ── Touch: title chip + dropdown ────────────────────────────────────────────
@@ -281,11 +287,26 @@
   allRow.textContent = 'all maps';
   sheet.appendChild(allRow);
 
+  function closeSheet() { sheet.classList.remove('open'); }
+
   chip.addEventListener('click', function (e) {
     e.stopPropagation();
     sheet.classList.toggle('open');
   });
-  document.addEventListener('click', function () { sheet.classList.remove('open'); });
+  document.addEventListener('click', closeSheet);
+  // Same stuck-open bug as the desktop hotzone/dock pair (see the focusout
+  // pair above, added for that pair by a previous fix): the sheet's own
+  // rows are focusable `role="menuitem"` links, but nothing closed the
+  // sheet when focus left them. Tabbing forward off the sheet's last row —
+  // or a screen reader's swipe-navigation doing the same — left this
+  // dropdown open over the board indefinitely, same as Escape doing
+  // nothing for it (fixed above).
+  chip.addEventListener('focusout', function (e) {
+    if (!sheet.contains(e.relatedTarget) && e.relatedTarget !== chip) closeSheet();
+  });
+  sheet.addEventListener('focusout', function (e) {
+    if (!sheet.contains(e.relatedTarget) && e.relatedTarget !== chip) closeSheet();
+  });
 
   document.body.appendChild(edge);
   document.body.appendChild(hotzone);
