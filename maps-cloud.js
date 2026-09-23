@@ -192,7 +192,7 @@
 
   // ── PostgREST ───────────────────────────────────────────────────────────────
 
-  async function rest(method, path, body, prefer) {
+  async function rest(method, path, body, prefer, opts) {
     const s = await ensureSession();
     const headers = {
       'apikey': cfg.supabaseAnonKey,
@@ -204,6 +204,10 @@
       method,
       headers,
       body: body !== undefined ? JSON.stringify(body) : undefined,
+      // Set only for the tab-hidden/pagehide flush below — it lets the
+      // request keep running after the page starts tearing down, instead of
+      // the browser killing it mid-flight like a normal fetch.
+      keepalive: !!(opts && opts.keepalive),
     });
     if (res.status === 401) {
       // Access token went stale server-side. Keep the refresh token — losing
@@ -231,8 +235,8 @@
     return rows && rows[0] ? rows[0] : null;
   }
   const deleteServerMap = (id) => rest('DELETE', 'maps?id=eq.' + id);
-  const upsertServerMap = (row) =>
-    rest('POST', 'maps?on_conflict=id', row, 'resolution=merge-duplicates,return=minimal');
+  const upsertServerMap = (row, opts) =>
+    rest('POST', 'maps?on_conflict=id', row, 'resolution=merge-duplicates,return=minimal', opts);
   // Same upsert, but returning the written row — an id owned by another
   // account comes back as an RLS error *or* as a silently-empty result,
   // depending on how Postgres routes the conflict. Callers treat both as
@@ -330,13 +334,13 @@
     };
   }
 
-  async function pushMap(id) {
+  async function pushMap(id, opts) {
     if (!enabled) return false;
     const entry = TodoMapsIndex.get(id);
     if (!entry) return false; // deleted (or undone away) before the push fired
     if (!UUID_RE.test(entry.id)) return false; // pre-cloud id — stays local-only
     try {
-      await upsertServerMap(rowFor(entry));
+      await upsertServerMap(rowFor(entry), opts);
       setStatus('ok');
       return true;
     } catch (e) {
@@ -379,6 +383,32 @@
     if (!enabled) return;
     clearTimeout(pushTimers[id]);
     pushTimers[id] = setTimeout(() => { delete pushTimers[id]; pushMap(id); }, delayMs || 1500);
+  }
+
+  // A debounced push (400ms–1500ms out) never gets to fire if the tab is
+  // closed, navigated away, or backgrounded first — the edit lands in
+  // localStorage (saveState is synchronous) but never reaches the server,
+  // so another device silently sees stale data with no error surfaced
+  // anywhere. Fire any still-pending pushes right away, with keepalive so
+  // the request can finish after the page starts tearing down.
+  //
+  // visibilitychange→hidden fires on tab-close, tab-switch, and mobile
+  // backgrounding alike, and — unlike beforeunload/unload — reliably fires
+  // there too (see the WICG unload-deprecation guidance). pagehide is kept
+  // as a second signal for browsers that fire it without a hidden
+  // visibilitychange transition first.
+  function flushPendingPushes() {
+    Object.keys(pushTimers).forEach(id => {
+      clearTimeout(pushTimers[id]);
+      delete pushTimers[id];
+      pushMap(id, { keepalive: true });
+    });
+  }
+  if (enabled) {
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') flushPendingPushes();
+    });
+    window.addEventListener('pagehide', flushPendingPushes);
   }
 
   async function pushDelete(id) {
