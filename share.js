@@ -182,7 +182,17 @@
     status.setAttribute('aria-live', 'polite');
 
     const opener = document.activeElement;
+    // Closing the dialog doesn't cancel whatever publish/update/remove
+    // request is in flight — the fetch keeps running. Without this flag,
+    // that request's continuation still fires: reopening the dialog starts
+    // a brand-new `busy` (it's scoped to this render function), so the old
+    // request is no longer mutually excluded from anything, and its stale
+    // result can call opts.setShare/opts.clearShare and clobber whatever
+    // the *new* dialog instance already committed. Checked after every
+    // await below, before any of those calls.
+    let dialogClosed = false;
     function close() {
+      dialogClosed = true;
       backdrop.remove();
       document.removeEventListener('keydown', onKey);
       if (opener && opener.focus) opener.focus();
@@ -257,6 +267,7 @@
         setStatus('Updating…');
         try {
           const ok = await api.update(id, rec.ownerKey, fresh);
+          if (dialogClosed) return;
           if (ok) {
             rec.updatedAt = new Date().toISOString();
             opts.setShare(rec);
@@ -266,6 +277,7 @@
             opts.clearShare();
           }
         } catch (err) {
+          if (dialogClosed) return;
           setStatus(err.message, true);
         }
         busy = false;
@@ -284,10 +296,12 @@
         setStatus('Removing…');
         try {
           await api.remove(id, rec.ownerKey);
+          if (dialogClosed) return;
           opts.clearShare();
           setStatus('');
           renderUnpublishedState();
         } catch (err) {
+          if (dialogClosed) return;
           setStatus(err.message, true);
           busy = false;
           updateBtn.disabled = false;
@@ -333,14 +347,17 @@
         try {
           const fresh = opts.serialize();
           const result = await api.publish(fresh, opts.kind);
+          if (dialogClosed) return;
           const now = new Date().toISOString();
           opts.setShare({ id: result.id, ownerKey: result.owner_key, publishedAt: now, updatedAt: now });
           renderPublishedState(result.id);
           const input = dialog.querySelector('input');
           copyToClipboard(shareUrlFor(result.id), input).then(ok => {
+            if (dialogClosed) return;
             setStatus(ok ? 'Published — link copied to your clipboard.' : 'Published. Copy the link above.');
           });
         } catch (err) {
+          if (dialogClosed) return;
           setStatus(err.message, true);
           publishBtn.disabled = false;
         }
