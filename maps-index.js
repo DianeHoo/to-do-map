@@ -172,14 +172,16 @@
     return readIndex().find(e => e.id === id) || null;
   }
 
-  // Patch one entry in place; returns the updated entry or null if missing.
+  // Patch one entry in place; returns the updated entry, or null if the
+  // entry is missing OR the write failed (storage unavailable) — callers
+  // must not treat a patch() result the same as reading back success, the
+  // way create()/duplicate()/reassignId() already guard their own writes.
   function patch(id, changes) {
     const entries = readIndex();
     const entry = entries.find(e => e.id === id);
     if (!entry) return null;
     Object.assign(entry, changes);
-    writeIndex(entries);
-    return entry;
+    return writeIndex(entries) ? entry : null;
   }
 
   function readData(id) {
