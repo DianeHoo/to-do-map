@@ -186,7 +186,13 @@
       });
       input.addEventListener('blur', () => {
         renamingId = null;
-        if (!cancelled) { Maps.rename(entry.id, input.value); cloudPush(entry.id); }
+        if (!cancelled) {
+          if (Maps.rename(entry.id, input.value) === null) {
+            showToast('couldn’t rename — browser storage is unavailable.');
+          } else {
+            cloudPush(entry.id);
+          }
+        }
         render();
       });
       row.appendChild(input);
@@ -394,23 +400,36 @@
         // Already shared once from here — refresh the same link if it's alive.
         const ok = await TodoMapShare.update(existing.id, existing.ownerKey, payload);
         if (ok) {
-          Maps.setShare(entry.id, { ...existing, updatedAt: new Date().toISOString() });
+          const saved = Maps.setShare(entry.id, { ...existing, updatedAt: new Date().toISOString() });
           const copied = await copyText(shareUrl(existing.id));
-          showToast(copied ? 'share link updated and copied' : 'share link updated — couldn’t reach the clipboard');
+          // A failed local write here isn't just cosmetic: the next share
+          // attempt reads entry.share to decide update-existing vs.
+          // publish-fresh (above). If it never saved, that check finds
+          // nothing and publishes a second, independent link — orphaning
+          // this one so the UI can no longer update or remove it.
+          if (!saved) {
+            showToast('share link updated, but couldn’t save locally — browser storage is unavailable. Sharing again will publish a new link.');
+          } else {
+            showToast(copied ? 'share link updated and copied' : 'share link updated — couldn’t reach the clipboard');
+          }
           return;
         }
         // Link was deleted server-side — fall through and publish fresh.
       }
       const res = await TodoMapShare.publish(payload, entry.kind);
       const now = new Date().toISOString();
-      Maps.setShare(entry.id, {
+      const saved = Maps.setShare(entry.id, {
         id: res.id,
         ownerKey: res.owner_key,
         publishedAt: now,
         updatedAt: now,
       });
       const copied = await copyText(shareUrl(res.id));
-      showToast(copied ? 'share link copied' : 'link published — couldn’t reach the clipboard');
+      if (!saved) {
+        showToast('link published, but couldn’t save locally — browser storage is unavailable. Sharing again will publish a new link.');
+      } else {
+        showToast(copied ? 'share link copied' : 'link published — couldn’t reach the clipboard');
+      }
     } catch (err) {
       showToast('couldn’t share: ' + err.message);
     }
